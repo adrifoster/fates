@@ -182,7 +182,10 @@ contains
           currentCohort%patchptr => currentPatch
 
           call mortality_rates(currentCohort,bc_in,cmort,hmort,bmort,frmort)
-          currentCohort%dmort  = cmort+hmort+bmort+frmort
+          !currentCohort%dmort  = cmort+hmort+bmort+frmort
+	  !Calculate joint probabilities (not including background mortality?)
+	   currentCohort%dmort  = cmort+hmort+bmort+frmort - cmort*hmort - cmort*frmort -      &
+		hmort*frmort + cmort*hmort*frmort
           call carea_allom(currentCohort%dbh,currentCohort%n,site_in%spread,currentCohort%pft, &
                currentCohort%c_area)
 
