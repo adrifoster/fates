@@ -50,7 +50,7 @@ def main():
     ():9}
     #
     # go through each of the variables and assign it to one of the sub-lists based on its dimensionality
-    for v_name, varin in dsin.variables.iteritems():
+    for v_name, varin in dsin.variables.items():
         sortorder = dimtype_sortorder_dict[varin.dimensions]
         # if a KeyError, it means that the parameter has a dimension which isn't in dimtype_sortorder_dict. need to add it.
         varnames_list[sortorder].append(v_name)
@@ -78,7 +78,7 @@ def main():
     dsout = nc.Dataset(args.fnameout,  "w")
     #
     #Copy dimensions
-    for dname, the_dim in dsin.dimensions.iteritems():
+    for dname, the_dim in dsin.dimensions.items():
         print dname, the_dim.size
         dsout.createDimension(dname, the_dim.size )
     #

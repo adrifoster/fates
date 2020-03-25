@@ -217,7 +217,7 @@ def main():
             actionstring = 'modify_fates_paramfile.py '+' '.join(sys.argv[1:])
             timestampstring = datetime.datetime.fromtimestamp(time.time()).strftime('%a %b %d %Y, %H:%M:%S')
             #
-            oldhiststr = ncfile.history
+            oldhiststr = str(ncfile.history)
             newhiststr = oldhiststr + "\n "+timestampstring + ': ' + actionstring
             ncfile.history = newhiststr
         #
