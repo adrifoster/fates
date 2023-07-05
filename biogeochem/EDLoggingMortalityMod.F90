@@ -13,66 +13,63 @@ module EDLoggingMortalityMod
    !  Date: 09/2017
    ! ====================================================================================
 
-   use FatesConstantsMod,       only : r8 => fates_r8
-   use FatesConstantsMod,       only : rsnbl_math_prec
-   use FatesConstantsMod,       only : itrue, ifalse
-   use FatesConstantsMod,       only : primaryforest
-   use FatesConstantsMod,       only : secondaryforest, secondary_age_threshold
-   use FatesConstantsMod,       only : fates_tiny
-   use FatesConstantsMod,       only : months_per_year, days_per_sec, g_per_kg
-   use FatesConstantsMod,       only : hlm_harvest_area_fraction
-   use FatesConstantsMod,       only : hlm_harvest_carbon
-   use FatesConstantsMod,       only : fates_check_param_set
-   use FatesConstantsMod,       only : area
-   use FatesConstantsMod,       only : area_inv
-   use FatesGlobals,            only : endrun => fates_endrun 
-   use FatesGlobals,            only : fates_log
-   use FatesGlobals,            only : fates_global_verbose
-   use EDParamsMod,             only : logging_export_frac
-   use EDParamsMod,             only : logging_event_code
-   use EDParamsMod,             only : logging_dbhmin
-   use EDParamsMod,             only : logging_dbhmax
-   use EDParamsMod,             only : logging_collateral_frac 
-   use EDParamsMod,             only : logging_direct_frac
-   use EDParamsMod,             only : logging_mechanical_frac 
-   use EDParamsMod,             only : logging_coll_under_frac 
-   use EDParamsMod,             only : logging_dbhmax_infra
-   use EDParamsMod,             only : pprodharv10_forest_mean
-   use FatesInterfaceTypesMod,  only : bc_in_type
-   use FatesInterfaceTypesMod,  only : bc_out_type
-   use FatesInterfaceTypesMod,  only : hlm_current_year
-   use FatesInterfaceTypesMod,  only : hlm_current_month
-   use FatesInterfaceTypesMod,  only : hlm_current_day
-   use FatesInterfaceTypesMod,  only : hlm_model_day
-   use FatesInterfaceTypesMod,  only : hlm_day_of_year 
-   use FatesInterfaceTypesMod,  only : hlm_days_per_year
-   use FatesInterfaceTypesMod,  only : hlm_use_lu_harvest
-   use FatesInterfaceTypesMod,  only : hlm_num_lu_harvest_cats
-   use FatesInterfaceTypesMod,  only : hlm_use_logging 
-   use FatesInterfaceTypesMod,  only : hlm_use_planthydro
-   use EDPftvarcon,             only : EDPftvarcon_inst
-   use EDPftvarcon,             only : GetDecompyFrac
-   use FatesSiteMod,            only : fates_site_type
-   use FatesSiteMod,            only : site_fluxdiags_type
-   use FatesPatchMod,           only : fates_patch_type
-   use FatesCohortMod,          only : fates_cohort_type
-   use FatesMassBalTypeMod,     only : site_massbal_type
-   use FatesLitterMod,          only : ncwd
-   use FatesLitterMod,          only : ndcmpy
-   use FatesLitterMod,          only : litter_type
-   use FatesLitterMod,          only : adjust_SF_CWD_frac
-   use PRTParametersMod,        only : prt_params
-   use PRTGenericMod,           only : num_elements
-   use PRTGenericMod,           only : element_list
-   use PRTGenericMod,           only : carbon12_element
-   use PRTGenericMod,           only : sapw_organ, struct_organ, leaf_organ
-   use PRTGenericMod,           only : fnrt_organ, store_organ, repro_organ
-   use PRTGenericMod,           only : element_pos
-   use FatesPlantHydraulicsMod, only : AccumulateMortalityWaterStorage
-   use FatesAllometryMod,       only : set_root_fraction
-   use FatesAllometryMod,       only : carea_allom
-   use SFParamsMod,             only : SF_val_cwd_frac
-   use shr_log_mod,             only : errMsg => shr_log_errMsg
+   use FatesConstantsMod,        only : r8 => fates_r8
+   use FatesConstantsMod,        only : rsnbl_math_prec
+   use FatesConstantsMod,        only : itrue, ifalse
+   use FatesConstantsMod,        only : primaryforest
+   use FatesConstantsMod,        only : secondaryforest, secondary_age_threshold
+   use FatesConstantsMod,        only : fates_tiny
+   use FatesConstantsMod,        only : months_per_year, days_per_sec, g_per_kg
+   use FatesConstantsMod,        only : hlm_harvest_area_fraction
+   use FatesConstantsMod,        only : hlm_harvest_carbon
+   use FatesConstantsMod,        only : fates_check_param_set
+   use FatesConstantsMod,        only : area
+   use FatesConstantsMod,        only : area_inv
+   use FatesGlobals,             only : endrun => fates_endrun 
+   use FatesGlobals,             only : fates_log
+   use FatesGlobals,             only : fates_global_verbose
+   use EDParamsMod,              only : logging_export_frac
+   use EDParamsMod,              only : logging_event_code
+   use EDParamsMod,              only : logging_dbhmin
+   use EDParamsMod,              only : logging_dbhmax
+   use EDParamsMod,              only : logging_collateral_frac 
+   use EDParamsMod,              only : logging_direct_frac
+   use EDParamsMod,              only : logging_mechanical_frac 
+   use EDParamsMod,              only : logging_coll_under_frac 
+   use EDParamsMod,              only : logging_dbhmax_infra
+   use EDParamsMod,              only : pprodharv10_forest_mean
+   use FatesInterfaceTypesMod,   only : bc_in_type
+   use FatesInterfaceTypesMod,   only : bc_out_type
+   use FatesInterfaceTypesMod,   only : hlm_current_year
+   use FatesInterfaceTypesMod,   only : hlm_current_month
+   use FatesInterfaceTypesMod,   only : hlm_current_day
+   use FatesInterfaceTypesMod,   only : hlm_model_day
+   use FatesInterfaceTypesMod,   only : hlm_day_of_year 
+   use FatesInterfaceTypesMod,   only : hlm_days_per_year
+   use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
+   use EDPftvarcon,              only : EDPftvarcon_inst
+   use EDPftvarcon,              only : GetDecompyFrac
+   use FatesSiteMod,             only : fates_site_type
+   use FatesSiteMod,             only : site_fluxdiags_type
+   use FatesPatchMod,            only : fates_patch_type
+   use FatesCohortMod,           only : fates_cohort_type
+   use FatesMassBalTypeMod,      only : site_massbal_type
+   use FatesLitterMod,           only : ncwd
+   use FatesLitterMod,           only : ndcmpy
+   use FatesLitterMod,           only : litter_type
+   use FatesLitterMod,           only : adjust_SF_CWD_frac
+   use PRTParametersMod,         only : prt_params
+   use PRTGenericMod,            only : num_elements
+   use PRTGenericMod,            only : element_list
+   use PRTGenericMod,            only : carbon12_element
+   use PRTGenericMod,            only : sapw_organ, struct_organ, leaf_organ
+   use PRTGenericMod,            only : fnrt_organ, store_organ, repro_organ
+   use PRTGenericMod,            only : element_pos
+   use FatesPlantHydraulicsMod,  only : AccumulateMortalityWaterStorage
+   use FatesAllometryMod,        only : set_root_fraction
+   use FatesAllometryMod,        only : carea_allom
+   use SFParamsMod,              only : SF_val_cwd_frac
+   use shr_log_mod,              only : errMsg => shr_log_errMsg
    
    implicit none
    private
@@ -129,7 +126,7 @@ contains
       icode = int(logging_event_code)
 
       ! this is true for either hlm harvest or fates logging
-      if(hlm_use_logging.eq.ifalse) return
+      if (.not. hlm_runtime_params_inst%get_use_logging()) return
 
       ! all of these are valid for hlm harvest
       ! so adjust annual harvest inputs accordingly in LoggingMortality_frac
@@ -248,12 +245,13 @@ contains
 
          ! Pass logging rates to cohort level 
          
-         if (hlm_use_lu_harvest == ifalse) then
+         if (.not. hlm_runtime_params_inst%get_use_lu_harvest()) then
             ! 0=use fates logging parameters directly when logging_time == .true.
             ! this means harvest the whole cohort area
             harvest_rate = 1._r8
             
-         else if (hlm_use_lu_harvest == itrue .and. hlm_harvest_units == hlm_harvest_area_fraction) then
+         else if (hlm_runtime_params_inst%get_use_lu_harvest() .and.                     &
+            hlm_harvest_units == hlm_harvest_area_fraction) then
             ! We are harvesting based on areal fraction, not carbon/biomass terms. 
             ! 1=use area fraction from hlm
             ! combine forest and non-forest fracs and then apply:
@@ -280,7 +278,8 @@ contains
                write(fates_log(), *) 'Successfully Read Harvest Rate from HLM.', hlm_harvest_rates(:), harvest_rate
             end if
 
-         else if (hlm_use_lu_harvest == itrue .and. hlm_harvest_units == hlm_harvest_carbon) then
+         else if (hlm_runtime_params_inst%get_use_lu_harvest() .and.                     &
+            hlm_harvest_units == hlm_harvest_carbon) then
             ! 2=use carbon from hlm
             ! shall call another subroutine, which transfers biomass/carbon into fraction
 
@@ -377,7 +376,7 @@ contains
      ! Loop around harvest categories to determine the annual hlm harvest rate for the current cohort based on patch history info
      ! We do account forest only since non-forest harvest has geographical mismatch to LUH2 dataset
      harvest_rate = 0._r8
-     do h_index = 1,hlm_num_lu_harvest_cats
+     do h_index = 1, hlm_runtime_params_inst%get_num_lu_harvest_cats()
         if (patch_anthro_disturbance_label .eq. primaryforest) then
            if(hlm_harvest_catnames(h_index) .eq. "HARVEST_VH1"  .or. &
                 hlm_harvest_catnames(h_index) .eq. "HARVEST_VH2") then
@@ -438,7 +437,8 @@ contains
 
    ! ============================================================================
 
-   subroutine get_harvestable_carbon (csite, site_area, hlm_harvest_catnames, harvestable_forest_c )
+   subroutine get_harvestable_carbon(csite, site_area, hlm_harvest_catnames,             &
+      num_harvest_cats, harvestable_forest_c)
 
      ! -------------------------------------------------------------------------------------------
      !
@@ -454,10 +454,10 @@ contains
 
      ! Arguments
      type(fates_site_type), intent(in), target :: csite
-     real(r8), intent(in) :: site_area    ! temporary variable
-     character(len=64), intent(in) :: hlm_harvest_catnames(:) ! names of hlm harvest categories
-
-     real(r8), intent(out) :: harvestable_forest_c(hlm_num_lu_harvest_cats)
+     real(r8),              intent(in)         :: site_area    ! temporary variable
+     character(len=64),     intent(in)         :: hlm_harvest_catnames(:) ! names of hlm harvest categories
+     integer,               intent(in)         :: num_harvest_cats
+     real(r8),              intent(out)        :: harvestable_forest_c(num_harvest_cats)
 
      ! Local Variables
      type(fates_patch_type), pointer  :: currentPatch
@@ -509,7 +509,7 @@ contains
         ! judge which category the current patch belong to
         ! since we have not separated forest vs. non-forest
         ! all carbon belongs to the forest categories
-        do h_index = 1,hlm_num_lu_harvest_cats
+        do h_index = 1, hlm_runtime_params_inst%get_num_lu_harvest_cats()
            if (currentPatch%anthro_disturbance_label .eq. primaryforest) then
               ! Primary
               if(hlm_harvest_catnames(h_index) .eq. "HARVEST_VH1") then
@@ -582,7 +582,7 @@ contains
      ! is merged with forest harvest, we only have three logging type in FATES (primary, secondary
      ! mature and secondary young).
      ! Get the harvest rate from HLM
-     do h_index = 1,hlm_num_lu_harvest_cats
+     do h_index = 1, hlm_runtime_params_inst%get_num_lu_harvest_cats()
         if (patch_anthro_disturbance_label .eq. primaryforest) then
            if(hlm_harvest_catnames(h_index) .eq. "HARVEST_VH1"  .or. &
                 hlm_harvest_catnames(h_index) .eq. "HARVEST_VH2") then
@@ -604,7 +604,7 @@ contains
 
      ! Determine harvest status (succesful or not)
      ! Here only three categories are used
-     do h_index = 1,hlm_num_lu_harvest_cats
+     do h_index = 1, hlm_runtime_params_inst%get_num_lu_harvest_cats()
         if (patch_anthro_disturbance_label .eq. primaryforest) then
            if(hlm_harvest_catnames(h_index) .eq. "HARVEST_VH1" ) then
               if(harvestable_forest_c(h_index) >= harvest_rate_c) then
@@ -837,7 +837,7 @@ contains
             end if
             
             if( (element_id .eq. carbon12_element) .and. &
-               hlm_use_planthydro == itrue ) then
+               hlm_runtime_params_inst%get_use_planthydro()) then
                call AccumulateMortalityWaterStorage(currentSite, &
                      currentCohort,(direct_dead+indirect_dead))
             end if
@@ -1117,7 +1117,7 @@ contains
 
    end subroutine UpdateHarvestC
 
-   subroutine get_harvest_debt(site_in, bc_in, harvest_tag)
+   subroutine get_harvest_debt(site_in, bc_in, harvest_tag, num_harvest_cats)
 
       !
       ! !DESCRIPTION:
@@ -1133,10 +1133,11 @@ contains
       ! harvest, thus the harvest tag for non-forest is not applicable (= 2)
       !
       ! !ARGUMENTS:
-      type(fates_site_type) , intent(inout), target :: site_in
-      type(bc_in_type),    intent(in)         :: bc_in
-      integer  :: harvest_tag(hlm_num_lu_harvest_cats)
-
+      type(fates_site_type), intent(inout), target :: site_in
+      type(bc_in_type),      intent(in)            :: bc_in
+      integer                                      :: harvest_tag(num_harvest_cats)
+      integer,               intent(in)            :: num_harvest_cats
+ 
       ! !LOCAL VARIABLES:
       integer  :: h_index
       real(r8) :: harvest_debt_pri
@@ -1151,7 +1152,7 @@ contains
          harvest_debt_sec_young = 0._r8
  
          ! First we need to get harvest rate for all three categories
-         do h_index = 1, hlm_num_lu_harvest_cats
+         do h_index = 1, hlm_runtime_params_inst%get_num_lu_harvest_cats()
             ! Primary forest harvest rate
             if(bc_in%hlm_harvest_catnames(h_index) .eq. "HARVEST_VH1" .or. &
                 bc_in%hlm_harvest_catnames(h_index) .eq. "HARVEST_VH2" ) then
@@ -1164,7 +1165,7 @@ contains
             end if
          end do
          ! Next we get the harvest debt through the harvest tag 
-         do h_index = 1, hlm_num_lu_harvest_cats
+         do h_index = 1, hlm_runtime_params_inst%get_num_lu_harvest_cats()
             if (harvest_tag(h_index) .eq. 1) then
                if(bc_in%hlm_harvest_catnames(h_index) .eq. "HARVEST_VH1") then
                   site_in%resources_management%harvest_debt = site_in%resources_management%harvest_debt + &

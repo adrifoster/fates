@@ -51,6 +51,7 @@ module EDPatchDynamicsMod
   use FatesInterfaceTypesMod    , only : hlm_use_nocomp
   use FatesInterfaceTypesMod    , only : hlm_use_fixed_biogeog
   use FatesInterfaceTypesMod    , only : hlm_num_lu_harvest_cats
+  use FatesHLMRuntimeParamsMod,   only : hlm_runtime_params_inst
   use FatesGlobals         , only : endrun => fates_endrun
   use FatesConstantsMod    , only : r8 => fates_r8
   use FatesConstantsMod    , only : itrue, ifalse
@@ -210,7 +211,8 @@ contains
     call get_frac_site_primary(site_in, frac_site_primary)
 
     ! get available biomass for harvest for all patches
-    call get_harvestable_carbon(site_in, bc_in%site_area, bc_in%hlm_harvest_catnames, harvestable_forest_c)
+    call get_harvestable_carbon(site_in, bc_in%site_area, bc_in%hlm_harvest_catnames,    &
+      hlm_runtime_params_inst%get_num_lu_harvest_cats(), harvestable_forest_c)
  
     currentPatch => site_in%oldest_patch
     do while (associated(currentPatch))   
@@ -257,7 +259,7 @@ contains
        currentPatch => currentPatch%younger
     end do
 
-    call get_harvest_debt(site_in, bc_in, harvest_tag)
+    call get_harvest_debt(site_in, bc_in, harvest_tag, hlm_runtime_params_inst%get_num_lu_harvest_cats())
 
     ! ---------------------------------------------------------------------------------------------
     ! Calculate Disturbance Rates based on the mortality rates just calculated

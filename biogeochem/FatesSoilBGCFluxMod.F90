@@ -50,10 +50,7 @@ module FatesSoilBGCFluxMod
   use FatesInterfaceTypesMod, only    : bc_in_type
   use FatesInterfaceTypesMod, only    : bc_out_type
   use FatesInterfaceTypesMod, only    : numpft
-  use FatesInterfaceTypesMod, only    : hlm_nu_com
-  use FatesInterfaceTypesMod, only    : hlm_parteh_mode
-  use FatesInterfaceTypesMod, only    : hlm_use_ch4
-  use FatesInterfaceTypesMod, only    : hlm_decomp
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
   use FatesConstantsMod , only : prescribed_p_uptake
   use FatesConstantsMod , only : prescribed_n_uptake
   use FatesConstantsMod , only : coupled_p_uptake
@@ -133,7 +130,7 @@ contains
     nsites = size(sites,dim=1)
 
     ! We can exit if this is a c-only simulation
-    select case (hlm_parteh_mode)
+    select case (hlm_runtime_params_inst%get_parteh_mode())
     case (prt_carbon_allom_hyp)
        ! These can now be zero'd
        do s = 1, nsites
@@ -269,7 +266,8 @@ contains
     real(r8), parameter :: ema_npp_tscale = 10._r8  ! 10 day
     
     ! Exit if we need not communicate with the hlm's ch4 module
-    if(.not.(hlm_use_ch4==itrue) .and. .not.(hlm_parteh_mode==prt_cnp_flex_allom_hyp) ) return
+    if (.not. (hlm_runtime_params_inst%get_use_ch4()) .and.                                  &
+      .not. (hlm_runtime_params_inst%get_parteh_mode() == prt_cnp_flex_allom_hyp)) return
     
     ! Initialize to zero
     bc_out%annavg_agnpp_pa(:) = 0._r8
@@ -424,23 +422,24 @@ contains
     real(r8) :: fnrt_c                       ! fine-root carbon [kg]
     real(r8) :: veg_rootc                    ! fine root carbon in each layer [g/m3]
     real(r8) :: decompmicc_layer             ! Microbial dedcomposer biomass for current layer
-
+    character(len=16) :: nutrient_scheme 
     real(r8), parameter :: decompmicc_lambda = 2.5_r8     ! Depth attenuation exponent for decomposer biomass
     real(r8), parameter :: decompmicc_zmax   = 7.0e-2_r8  ! Depth of maximum decomposer biomass
 
 
+    nutrient_scheme = hlm_runtime_params_inst%get_nutrient_scheme()
     ! Whether this is a trivial or coupled run,
     ! the following variables get initialized in the same way
     bc_out%veg_rootc(:,:) = 0._r8
     bc_out%ft_index(:)    = -1
-    if(trim(hlm_nu_com).eq.'ECA')then
+    if(trim(nutrient_scheme).eq.'ECA')then
        bc_out%decompmicc(:)  = 0._r8
        bc_out%cn_scalar(:)   = 1._r8
        bc_out%cp_scalar(:)   = 1._r8
     end if
 
     if(fates_np_comp_scaling == trivial_np_comp_scaling) then
-       if(trim(hlm_nu_com).eq.'RD')then
+       if(trim(nutrient_scheme).eq.'RD')then
           bc_out%num_plant_comps = 1
           bc_out%ft_index(1)    = 1
           return
@@ -481,7 +480,7 @@ contains
 
              bc_out%veg_rootc(icomp,id) = bc_out%veg_rootc(icomp,id) + veg_rootc
 
-             if(trim(hlm_nu_com).eq.'ECA')then
+             if(trim(nutrient_scheme).eq.'ECA')then
 
                 ! We use a 2 parameter exponential attenuation function to estimate decomposer biomass
                 ! The parameter EDPftvarcon_inst%decompmicc(pft) is the maximum amount found at depth
@@ -503,7 +502,7 @@ contains
 
     ! We calculate the decomposer microbial biomass by weighting with the
     ! root biomass. This is just the normalization step
-    if(trim(hlm_nu_com).eq.'ECA')then
+    if(trim(nutrient_scheme).eq.'ECA')then
        do id = 1,bc_in%nlevdecomp
           bc_out%decompmicc(id) = bc_out%decompmicc(id) / &
                max(nearzero,sum(bc_out%veg_rootc(:,id),dim=1))
@@ -835,7 +834,7 @@ contains
     ! plant organ, and mulitplying that by the different C Fluxes to get a total
     ! approximate N flux.  Note, in C-only, we will not capture any re-absorption.
     
-    if(trim(hlm_decomp).eq.'MIMICS') then
+    if(trim(hlm_runtime_params_inst%get_decomp_scheme()).eq.'MIMICS') then
 
        ! If we track nitrogen (ie cnp or other) then
        ! we diagnose the c-lig/n ratio directly from the pools

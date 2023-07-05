@@ -19,8 +19,7 @@ module FatesSiteMod
   use FatesGlobals,                only : endrun => fates_endrun
   use EDPftvarcon,                 only : EDPftvarcon_inst
   use FatesInterfaceTypesMod,      only : nlevage, nlevdamage, nlevsclass, numpft
-  use FatesInterfaceTypesMod,      only : hlm_use_nocomp, hlm_use_fixed_biogeog
-  use FatesInterfaceTypesMod,      only : hlm_use_tree_damage
+  use FatesHLMRuntimeParamsMod,    only : hlm_runtime_params_inst
   use FatesPatchMod,               only : fates_patch_type
   use FatesResourcesManagementMod, only : fates_resources_management_type
   use FatesMassBalTypeMod,         only : site_massbal_type
@@ -274,7 +273,7 @@ module FatesSiteMod
       allocate(this%mass_balance(1:num_elements))
       allocate(this%flux_diags(1:num_elements))
 
-      if (hlm_use_tree_damage == itrue) then 
+      if (hlm_runtime_params_inst%get_use_tree_damage()) then 
         allocate(this%term_nindivs_canopy_damage(1:nlevdamage,1:nlevsclass,1:numpft))
         allocate(this%term_nindivs_ustory_damage(1:nlevdamage,1:nlevsclass,1:numpft))
         allocate(this%imort_rate_damage(1:nlevdamage,1:nlevsclass,1:numpft))
@@ -313,7 +312,8 @@ module FatesSiteMod
       allocate(this%dz_soil(num_levsoil))
       allocate(this%z_soil(num_levsoil))
 
-      if (hlm_use_nocomp == itrue .and. hlm_use_fixed_biogeog == itrue) then
+      if (hlm_runtime_params_inst%get_use_nocomp() .and.                                 &
+        hlm_runtime_params_inst%get_use_fixed_biogeog()) then
         ! SP and nocomp require a bare-ground patch.
         allocate(this%area_pft(0:numpft))
       else  

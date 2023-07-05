@@ -35,15 +35,10 @@ module FatesHistoryInterfaceMod
   use FatesIOVariableKindMod   , only : fates_io_variable_kind_type
   use FatesIOVariableKindMod   , only : site_int
   use FatesHistoryVariableType , only : fates_history_variable_type
-  use FatesInterfaceTypesMod        , only : hlm_hio_ignore_val
-  use FatesInterfaceTypesMod        , only : hlm_use_planthydro
-  use FatesInterfaceTypesMod        , only : hlm_use_ed_st3
-  use FatesInterfaceTypesMod        , only : hlm_use_cohort_age_tracking
-  use FatesInterfaceTypesMod        , only : hlm_use_tree_damage
+  use FatesHLMRuntimeParamsMod,  only : hlm_runtime_params_inst
   use FatesInterfaceTypesMod        , only : nlevdamage
   use FatesInterfaceTypesMod        , only : numpft
   use FatesInterfaceTypesMod        , only : hlm_freq_day
-  use FatesInterfaceTypesMod        , only : hlm_parteh_mode
   use EDParamsMod              , only : ED_val_comp_excln
   use EDParamsMod              , only : ED_val_phen_coldtemp
   use FatesInterfaceTypesMod        , only : nlevsclass, nlevage
@@ -51,8 +46,6 @@ module FatesHistoryInterfaceMod
   use FatesInterfaceTypesMod        , only : bc_in_type
   use FatesInterfaceTypesMod        , only : hlm_model_day
   use FatesInterfaceTypesMod        , only : nlevcoage
-  use FatesInterfaceTypesMod        , only : hlm_use_nocomp
-  use FatesInterfaceTypesMod        , only : hlm_use_fixed_biogeog
   use FatesAllometryMod             , only : CrownDepth
   use FatesAllometryMod             , only : bstore_allom
   use FatesAllometryMod             , only : set_root_fraction
@@ -1738,7 +1731,7 @@ end subroutine flush_hvars
     ! We make one exception to this rule, for the fates_fraction variable.  That way
     ! we can always know what fraction of the gridcell FATES is occupying.
 
-    flushval = hlm_hio_ignore_val
+    flushval = hlm_runtime_params_inst%get_hio_ignore_val()
     if (present(flush_to_zero)) then
        if (flush_to_zero) then
           flushval = 0.0_r8
@@ -2083,7 +2076,7 @@ end subroutine flush_hvars
       if(fnrtc_si>nearzero)then
          hio_l2fr_si(io_si) = hio_l2fr_si(io_si)/fnrtc_si
       else
-         hio_l2fr_si(io_si) = hlm_hio_ignore_val
+         hio_l2fr_si(io_si) = hlm_runtime_params_inst%get_hio_ignore_val()
       end if
       
 
@@ -2492,7 +2485,7 @@ end subroutine flush_hvars
                hio_lai_si                           => this%hvars(ih_lai_si)%r81d )
 
    ! If we don't have dynamics turned on, we just abort these diagnostics
-   if (hlm_use_ed_st3.eq.itrue) return
+   if (hlm_runtime_params_inst%get_use_ed_st3()) return
 
    model_day_int = nint(hlm_model_day)
 
@@ -2543,7 +2536,7 @@ end subroutine flush_hvars
       end do
 
       ! damage variables - site level - this needs to be OUT of the patch loop 
-      if(hlm_use_tree_damage .eq. itrue) then
+      if (hlm_runtime_params_inst%get_use_tree_damage()) then
          
          this%hvars(ih_crownarea_canopy_damage_si)%r81d(io_si) = &
               this%hvars(ih_crownarea_canopy_damage_si)%r81d(io_si) + &
@@ -2601,7 +2594,7 @@ end subroutine flush_hvars
 
       ! If hydraulics are turned on, track the error terms associated with
       ! dynamics [kg/m2]
-      if(hlm_use_planthydro.eq.itrue)then
+      if (hlm_runtime_params_inst%get_use_planthydro()) then
          this%hvars(ih_h2oveg_dead_si)%r81d(io_si)         = sites(s)%si_hydr%h2oveg_dead
          this%hvars(ih_h2oveg_recruit_si)%r81d(io_si)      = sites(s)%si_hydr%h2oveg_recruit
          this%hvars(ih_h2oveg_growturn_err_si)%r81d(io_si) = sites(s)%si_hydr%h2oveg_growturn_err
@@ -2713,7 +2706,7 @@ end subroutine flush_hvars
                cpatch%Scorch_ht(i_pft) * cpatch%area
 
             ! and also pft-labeled patch areas in the event that we are in nocomp mode
-            if ( hlm_use_nocomp .eq. itrue .and. cpatch%nocomp_pft_label .eq. i_pft) then 
+            if (hlm_runtime_params_inst%get_use_nocomp() .and. cpatch%nocomp_pft_label .eq. i_pft) then 
                this%hvars(ih_nocomp_pftpatchfraction_si_pft)%r82d(io_si,i_pft) = &
                     this%hvars(ih_nocomp_pftpatchfraction_si_pft)%r82d(io_si,i_pft) + cpatch%area * AREA_INV
 
@@ -3149,7 +3142,7 @@ end subroutine flush_hvars
                hio_m9_si_scpf(io_si,scpf) = hio_m9_si_scpf(io_si,scpf) +       &
                   ccohort%smort*ccohort%n / m2_per_ha
 
-               if (hlm_use_cohort_age_tracking .eq.itrue) then
+               if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
                   hio_m10_si_scpf(io_si,scpf) = hio_m10_si_scpf(io_si,scpf) +  &
                      ccohort%asmort*ccohort%n / m2_per_ha
                   hio_m10_si_capf(io_si,capf) = hio_m10_si_capf(io_si,capf) +  &
@@ -3175,7 +3168,7 @@ end subroutine flush_hvars
                ! Examine secondary forest mortality and mortality rates
                if(cpatch%anthro_disturbance_label .eq. secondaryforest) then
 
-                  if (hlm_use_cohort_age_tracking .eq.itrue) then
+                  if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
                      hio_m10_sec_si_scls(io_si,scls) = hio_m10_sec_si_scls(io_si,scls) +  &
                         ccohort%asmort*ccohort%n / m2_per_ha
                   end if
@@ -3202,13 +3195,13 @@ end subroutine flush_hvars
                hio_nplant_si_scpf(io_si,scpf) = hio_nplant_si_scpf(io_si,scpf) + ccohort%n / m2_per_ha
 
                ! number density along the cohort age dimension
-               if (hlm_use_cohort_age_tracking .eq.itrue) then
+               if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
                   hio_nplant_si_capf(io_si,capf) = hio_nplant_si_capf(io_si,capf) + ccohort%n / m2_per_ha
                   hio_nplant_si_cacls(io_si,cacls) = hio_nplant_si_cacls(io_si,cacls)+ccohort%n / m2_per_ha
                end if
 
                ! damage variables - cohort level 
-               if(hlm_use_tree_damage .eq. itrue) then
+               if (hlm_runtime_params_inst%get_use_tree_damage()) then
 
                   cdpf = get_cdamagesizepft_class_index(ccohort%dbh, ccohort%crowndamage, ccohort%pft)
 
@@ -3392,7 +3385,7 @@ end subroutine flush_hvars
                        ccohort%n * ccohort%npp_acc_hold / m2_per_ha / days_per_year / sec_per_day
 
                   ! damage variables - canopy
-                  if(hlm_use_tree_damage .eq. itrue) then
+                  if (hlm_runtime_params_inst%get_use_tree_damage()) then
 
                      ! carbon starvation mortality in the canopy by size x damage x pft 
                      this%hvars(ih_m3_mortality_canopy_si_cdpf)%r82d(io_si,cdpf) = &
@@ -3542,7 +3535,7 @@ end subroutine flush_hvars
                        ccohort%npp_acc_hold * ccohort%n / m2_per_ha / days_per_year / sec_per_day
 
                   ! damage variables - understory
-                  if(hlm_use_tree_damage .eq. itrue) then
+                  if (hlm_runtime_params_inst%get_use_tree_damage()) then
 
                      ! carbon mortality in the understory by damage x size x pft
                      this%hvars(ih_m3_mortality_understory_si_cdpf)%r82d(io_si,cdpf) = &
@@ -3868,7 +3861,7 @@ end subroutine flush_hvars
       end do
 
       
-      if(hlm_use_tree_damage .eq. itrue) then
+      if (hlm_runtime_params_inst%get_use_tree_damage()) then
 
          do i_pft = 1, numpft
             do icdam = 1, nlevdamage
@@ -3953,7 +3946,7 @@ end subroutine flush_hvars
                hio_m9_si_scpf(io_si,i_scpf) + &
                hio_m10_si_scpf(io_si,i_scpf)
             
-            if(hlm_use_tree_damage .eq. itrue) then
+            if (hlm_runtime_params_inst%get_use_tree_damage()) then
                hio_mortality_si_pft(io_si, i_pft) = hio_mortality_si_pft(io_si,i_pft) + &
                     this%hvars(ih_m11_si_scpf)%r82d(io_si,i_scpf)
             end if
@@ -4470,7 +4463,7 @@ end subroutine flush_hvars
          
          ! Calculate the site-level total vegetated area (i.e. non-bareground)
          site_area_veg = area
-         if (hlm_use_nocomp .eq. itrue .and. hlm_use_fixed_biogeog .eq. itrue) then
+         if (hlm_runtime_params_inst%get_use_nocomp() .and. hlm_runtime_params_inst%get_use_fixed_biogeog()) then
             site_area_veg = area - sites(s)%area_pft(0)
          end if
 
@@ -4872,7 +4865,7 @@ end subroutine update_history_hifrq
 
     logical, parameter :: print_iterations = .false.
 
-    if(hlm_use_planthydro.eq.ifalse) return
+    if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
 
 
     associate( hio_errh2o_scpf  => this%hvars(ih_errh2o_scpf)%r82d, &
@@ -5124,10 +5117,10 @@ end subroutine update_history_hifrq
             cpatch => cpatch%younger
          end do !patch loop
 
-         if(hlm_use_ed_st3.eq.ifalse) then
+         if (.not. hlm_runtime_params_inst%get_use_ed_st3()) then
             do iscpf=1,nlevsclass*numpft
                if ((abs(hio_nplant_si_scpf(io_si, iscpf)-(nplant_scpf(iscpf)*ha_per_m2)) > 1.0E-8_r8) .and. &
-               (hio_nplant_si_scpf(io_si, iscpf) .ne. hlm_hio_ignore_val)) then
+               (hio_nplant_si_scpf(io_si, iscpf) .ne. hlm_runtime_params_inst%get_hio_ignore_val())) then
                   write(fates_log(),*) 'numpft:',numpft
                   write(fates_log(),*) 'nlevsclass:',nlevsclass
                   write(fates_log(),*) 'scpf:',iscpf
@@ -5219,7 +5212,6 @@ end subroutine update_history_hifrq
     use FatesIOVariableKindMod, only : site_size_r8, site_pft_r8, site_age_r8
     use FatesIOVariableKindMod, only : site_coage_pft_r8, site_coage_r8
     use FatesIOVariableKindMod, only : site_height_r8, site_agefuel_r8
-    use FatesInterfaceTypesMod     , only : hlm_use_planthydro
 
     use FatesIOVariableKindMod, only : site_fuel_r8, site_cwdsc_r8, site_scag_r8
     use FatesIOVariableKindMod, only : site_can_r8, site_cnlf_r8, site_cnlfpft_r8
@@ -5493,7 +5485,7 @@ end subroutine update_history_hifrq
          upfreq=1, ivar=ivar, initialize=initialize_variables,                 &
          index=ih_mortality_si_pft)
 
-    nocomp_if: if (hlm_use_nocomp .eq. itrue) then
+    nocomp_if: if (hlm_runtime_params_inst%get_use_nocomp()) then
        call this%set_history_var(vname='FATES_NOCOMP_NPATCHES_PF', units='',      &
             long='number of patches per PFT (nocomp-mode-only)',                  &
             use_default='active', avgflag='A', vtype=site_pft_r8, hlms='CLM:ALM', &
@@ -5882,7 +5874,7 @@ end subroutine update_history_hifrq
 
 
     ! Output specific to the chemical species dynamics used (parteh)
-    select case(hlm_parteh_mode)
+    select case(hlm_runtime_params_inst%get_parteh_mode())
     case (prt_cnp_flex_allom_hyp)
 
        call this%set_history_var(vname='FATES_L2FR', units='kg kg-1',                   &
@@ -7868,7 +7860,7 @@ end subroutine update_history_hifrq
 
 
     ! CROWN DAMAGE VARIABLES
-    if_crowndamage: if(hlm_use_tree_damage .eq. itrue) then 
+    if_crowndamage: if (hlm_runtime_params_inst%get_use_tree_damage()) then 
 
        call this%set_history_var(vname='FATES_CROWNAREA_CANOPY_CD', units = 'm2 m-2 yr-1',         &
             long='crownarea lost to damage each year', use_default='inactive',   &
@@ -8109,7 +8101,7 @@ end subroutine update_history_hifrq
 
     ! PLANT HYDRAULICS
 
-    hydro_active_if: if(hlm_use_planthydro.eq.itrue) then
+    hydro_active_if: if (hlm_runtime_params_inst%get_use_planthydro()) then
 
        call this%set_history_var(vname='FATES_ERRH2O_SZPF', units='kg s-1',    &
              long='mean individual water balance error in kg per individual per second', &

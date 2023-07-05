@@ -24,7 +24,7 @@ module FatesHLMRuntimeParamsMod
 
   character(len=*), parameter :: sourcefile = __FILE__
 
-  type, public :: hlm_runtime_params
+  type :: hlm_runtime_params
     
     type(integer_param),   private :: num_swb                     ! number of broadbands in the shortwave radiation spectrum to track
                                                                      !   typically 2 as a default, VIS & NIR

@@ -27,6 +27,7 @@ module EDMainMod
   use FatesInterfaceTypesMod        , only : hlm_masterproc
   use FatesInterfaceTypesMod        , only : numpft
   use FatesInterfaceTypesMod        , only : hlm_use_nocomp
+  use FatesHLMRuntimeParamsMod,       only : hlm_runtime_params_inst
   use PRTGenericMod            , only : prt_carbon_allom_hyp
   use PRTGenericMod            , only : prt_cnp_flex_allom_hyp
   use PRTGenericMod            , only : nitrogen_element
@@ -413,7 +414,9 @@ contains
     bc_out%ar_site = 0._r8
 
     ! Patch level biomass are required for C-based harvest
-    call get_harvestable_carbon(currentSite, bc_in%site_area, bc_in%hlm_harvest_catnames, harvestable_forest_c)
+    call get_harvestable_carbon(currentSite, bc_in%site_area,                            &
+      bc_in%hlm_harvest_catnames, hlm_runtime_params_inst%get_num_lu_harvest_cats(),     &
+      harvestable_forest_c)
 
     ! Set a pointer to this sites carbon12 mass balance
     site_cmass => currentSite%mass_balance(element_pos(carbon12_element))

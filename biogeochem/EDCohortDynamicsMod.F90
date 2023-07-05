@@ -23,10 +23,8 @@ Module EDCohortDynamicsMod
   use EDParamsMod,                only : ED_val_cohort_age_fusion_tol
   use EDParamsMod,                only : max_cohort_per_patch
   use FatesInterfaceTypesMod,     only : bc_in_type
-  use FatesInterfaceTypesMod,     only : hlm_use_planthydro
-  use FatesInterfaceTypesMod,     only : hlm_use_cohort_age_tracking
+  use FatesHLMRuntimeParamsMod,   only : hlm_runtime_params_inst
   use FatesInterfaceTypesMod,     only : nleafage
-  use FatesInterfaceTypesMod,     only : hlm_parteh_mode
   use EDPftvarcon,                only : EDPftvarcon_inst
   use EDPftvarcon,                only : GetDecompyFrac
   use FatesSiteMod,               only : fates_site_type
@@ -151,9 +149,7 @@ real(r8), intent(in)      :: nn               ! number of individuals in cohort
 real(r8), intent(in)      :: hite             ! height: meters
 real(r8), intent(in)      :: coage            ! cohort age in years
 real(r8), intent(in)      :: dbh              ! dbh: cm
-class(prt_vartypes),intent(inout), pointer :: prt             ! The allocated PARTEH
-!class(prt_vartypes),target :: prt             ! The allocated PARTEH
-                                              ! object
+class(prt_vartypes),intent(inout), pointer :: prt ! The allocated PARTEH object
 real(r8), intent(in)      :: ctrim            ! What is the fraction of the maximum
                                               ! leaf biomass that we are targeting?
 real(r8), intent(in)      :: spread           ! The community assembly effects how
@@ -201,7 +197,7 @@ endif
 !! allocate(newCohort%tveg_lpa)
 !! call newCohort%tveg_lpa%InitRMean(ema_lpa,init_value=patchptr%tveg_lpa%GetMean())
 
-if( hlm_use_planthydro.eq.itrue ) then
+if (hlm_runtime_params_inst%get_use_planthydro()) then
 
    nlevrhiz = currentSite%si_hydr%nlevrhiz
 
@@ -279,7 +275,7 @@ end subroutine create_cohort
     class(cnp_allom_prt_vartypes), pointer :: cnp_allom_prt
 
 
-    select case(hlm_parteh_mode)
+    select case(hlm_runtime_params_inst%get_parteh_mode())
     case (prt_carbon_allom_hyp)
 
         allocate(c_allom_prt)
@@ -465,7 +461,7 @@ end subroutine create_cohort
    ! preserve a record of the to-be-terminated cohort for mortality accounting
    levcan = currentCohort%canopy_layer
 
-   if( hlm_use_planthydro == itrue ) &
+   if (hlm_runtime_params_inst%get_use_planthydro()) &
       call AccumulateMortalityWaterStorage(currentSite,currentCohort,currentCohort%n)
 
    ! Update the site-level carbon flux and individuals count for the appropriate canopy layer
@@ -814,7 +810,7 @@ end subroutine create_cohort
                                         (nextc%coage * (nextc%n/(currentCohort%n + nextc%n)))
 
                                    ! update the cohort age again
-                                   if (hlm_use_cohort_age_tracking .eq.itrue) then
+                                   if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
                                       call coagetype_class_index(currentCohort%coage, currentCohort%pft, &
                                            currentCohort%coage_class, currentCohort%coage_by_pft_class)
                                    end if
@@ -947,7 +943,7 @@ end subroutine create_cohort
                                    call sizetype_class_index(currentCohort%dbh,currentCohort%pft, &
                                         currentCohort%size_class,currentCohort%size_by_pft_class)
 
-                                   if(hlm_use_planthydro.eq.itrue) then
+                                   if (hlm_runtime_params_inst%get_use_planthydro()) then
                                       call FuseCohortHydraulics(currentSite,currentCohort,nextc,bc_in,newn)
                                    endif
 
@@ -1033,9 +1029,9 @@ end subroutine create_cohort
                                       currentCohort%frmort = (currentCohort%n*currentCohort%frmort + nextc%n*nextc%frmort)/newn
 
                                       ! Nutrients
-                                      if(hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+                                      if (hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp) then
 
-                                         if(nextc%n > currentCohort%n) currentCohort%cnp_limiter = nextc%cnp_limiter
+                                         if (nextc%n > currentCohort%n) currentCohort%cnp_limiter = nextc%cnp_limiter
 
                                          currentCohort%cx_int = (currentCohort%n*currentCohort%cx_int + &
                                               nextc%n*nextc%cx_int)/newn
@@ -1120,7 +1116,7 @@ end subroutine create_cohort
                                    ! At this point, nothing should be pointing to current Cohort
                                    ! update hydraulics quantities that are functions of hite & biomasses
                                    ! deallocate the hydro structure of nextc
-                                   if (hlm_use_planthydro.eq.itrue) then
+                                   if (hlm_runtime_params_inst%get_use_planthydro()) then
                                       call UpdateSizeDepPlantHydProps(currentSite,currentCohort, bc_in)
                                    endif
 
@@ -1167,7 +1163,7 @@ end subroutine create_cohort
            enddo
 
 
-           if ( hlm_use_cohort_age_tracking .eq.itrue) then
+           if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
               if ( nocohorts > max_cohort_per_patch ) then
                  iterate = 1
                  !---------------------------------------------------------------------!
@@ -1699,7 +1695,7 @@ end subroutine create_cohort
       else
          newly_recovered = .true.
          allocate(rcohort)
-         if(hlm_use_planthydro .eq. itrue) call InitHydrCohort(csite,rcohort)
+         if(hlm_runtime_params_inst%get_use_planthydro()) call InitHydrCohort(csite,rcohort)
          ! Initialize the PARTEH object and point to the
          ! correct boundary condition fields
          rcohort%prt => null()

@@ -21,101 +21,82 @@ module FatesPlantHydraulicsMod
   !
   ! ==============================================================================================
 
-  use FatesGlobals, only      : endrun => fates_endrun
-  use FatesGlobals, only      : fates_log
+  use FatesGlobals,             only : endrun => fates_endrun
+  use FatesGlobals,             only : fates_log
+  use FatesConstantsMod,        only : r8 => fates_r8
+  use FatesConstantsMod,        only : denh2o => dens_fresh_liquid_water
+  use FatesConstantsMod,        only : grav_earth
+  use FatesConstantsMod,        only : ifalse
+  use FatesConstantsMod,        only : pi_const
+  use FatesConstantsMod,        only : cm2_per_m2
+  use FatesConstantsMod,        only : g_per_kg
+  use FatesConstantsMod,        only : nearzero
+  use FatesConstantsMod,        only : mpa_per_pa
+  use FatesConstantsMod,        only : m_per_mm
+  use FatesConstantsMod,        only : pa_per_mpa
+  use FatesConstantsMod,        only : cm3_per_m3
+  use FatesConstantsMod,        only : kg_per_g
+  use FatesConstantsMod,        only : fates_unset_r8
+  use FatesConstantsMod,        only : nocomp_bareground
+  use EDParamsMod,              only : hydr_kmax_rsurf1
+  use EDParamsMod,              only : hydr_kmax_rsurf2
+  use EDParamsMod,              only : hydr_psi0
+  use EDParamsMod,              only : hydr_psicap
+  use EDParamsMod,              only : hydr_htftype_node
+  use EDParamsMod,              only : hydr_solver
+  use FatesSiteMod,             only : fates_site_type
+  use FatesPatchMod,            only : fates_patch_type
+  use FatesCohortMod,           only : fates_cohort_type
+  use FatesConstantsMod,        only : AREA_INV
+  use FatesConstantsMod,        only : AREA
+  use FatesConstantsMod,        only : leaves_on
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
+  use FatesInterfaceTypesMod,   only : bc_in_type
+  use FatesInterfaceTypesMod,   only : bc_out_type
+  use FatesInterfaceTypesMod,   only : numpft
+  use FatesInterfaceTypesMod,   only : nlevsclass
+  use FatesAllometryMod,        only : bleaf
+  use FatesAllometryMod,        only : bsap_allom
+  use FatesAllometryMod,        only : CrownDepth
+  use FatesHydraulicsMemMod,    only: hydr_solver_1DTaylor
+  use FatesHydraulicsMemMod,    only: hydr_solver_2DNewton
+  use FatesHydraulicsMemMod,    only: hydr_solver_2DPicard
+  use FatesHydraulicsMemMod,    only: ed_site_hydr_type
+  use FatesHydraulicsMemMod,    only: ed_cohort_hydr_type
+  use FatesHydraulicsMemMod,    only: n_hypool_plant
+  use FatesHydraulicsMemMod,    only: n_hypool_leaf
+  use FatesHydraulicsMemMod,    only: n_hypool_tot
+  use FatesHydraulicsMemMod,    only: n_hypool_stem
+  use FatesHydraulicsMemMod,    only: n_hypool_troot
+  use FatesHydraulicsMemMod,    only: n_hypool_aroot
+  use FatesHydraulicsMemMod,    only: n_plant_media
+  use FatesHydraulicsMemMod,    only: nshell
+  use FatesHydraulicsMemMod,    only: n_hypool_ag
+  use FatesHydraulicsMemMod,    only: stomata_p_media
+  use FatesHydraulicsMemMod,    only: leaf_p_media
+  use FatesHydraulicsMemMod,    only: stem_p_media
+  use FatesHydraulicsMemMod,    only: troot_p_media
+  use FatesHydraulicsMemMod,    only: aroot_p_media
+  use FatesHydraulicsMemMod,    only: rhiz_p_media
+  use FatesHydraulicsMemMod,    only: nlevsoi_hyd_max
+  use FatesHydraulicsMemMod,    only: rwccap, rwcft
+  use PRTGenericMod,            only : carbon12_element
+  use PRTGenericMod,            only : leaf_organ, fnrt_organ, sapw_organ
+  use PRTGenericMod,            only : store_organ, repro_organ, struct_organ
+  use PRTGenericMod,            only : num_elements
+  use PRTGenericMod,            only : element_list
+  use EDPftvarcon,              only : EDPftvarcon_inst
+  use PRTParametersMod,         only : prt_params
+  use FatesHydroWTFMod,         only : wrf_arr_type
+  use FatesHydroWTFMod,         only : wkf_arr_type
+  use FatesHydroWTFMod,         only : wrf_type, wrf_type_vg, wrf_type_cch, wrf_type_tfs
+  use FatesHydroWTFMod,         only : wkf_type, wkf_type_vg, wkf_type_cch, wkf_type_tfs
+  use FatesHydroWTFMod,         only : wrf_type_smooth_cch, wkf_type_smooth_cch
 
-  use FatesConstantsMod, only : r8 => fates_r8
-  use FatesConstantsMod, only : fates_huge
-  use FatesConstantsMod, only : denh2o => dens_fresh_liquid_water
-  use FatesConstantsMod, only : grav_earth
-  use FatesConstantsMod, only : ifalse, itrue
-  use FatesConstantsMod, only : pi_const
-  use FatesConstantsMod, only : cm2_per_m2
-  use FatesConstantsMod, only : g_per_kg
-  use FatesConstantsMod, only : nearzero
-  use FatesConstantsMod, only : mpa_per_pa
-  use FatesConstantsMod, only : m_per_mm
-  use FatesConstantsMod, only : mg_per_kg
-  use FatesConstantsMod, only : pa_per_mpa
-  use FatesConstantsMod, only : rsnbl_math_prec
-  use FatesConstantsMod, only : m3_per_mm3
-  use FatesConstantsMod, only : cm3_per_m3
-  use FatesConstantsMod, only : kg_per_g
-  use FatesConstantsMod, only : fates_unset_r8
-  use FatesConstantsMod, only : nocomp_bareground
-
-  use EDParamsMod       , only : hydr_kmax_rsurf1
-  use EDParamsMod       , only : hydr_kmax_rsurf2
-  use EDParamsMod       , only : hydr_psi0
-  use EDParamsMod       , only : hydr_psicap
-  use EDParamsMod       , only : hydr_htftype_node
-  use EDParamsMod       , only : hydr_solver
-
-  use FatesSiteMod      , only : fates_site_type
-  use FatesPatchMod     , only : fates_patch_type
-  use FatesCohortMod    , only : fates_cohort_type
-  use FatesConstantsMod        , only : AREA_INV
-  use FatesConstantsMod        , only : AREA
-  use FatesConstantsMod , only : leaves_on
-
-  use FatesInterfaceTypesMod  , only : bc_in_type
-  use FatesInterfaceTypesMod  , only : bc_out_type
-  use FatesInterfaceTypesMod  , only : hlm_use_planthydro
-  use FatesInterfaceTypesMod  , only : hlm_ipedof
-  use FatesInterfaceTypesMod  , only : numpft
-  use FatesInterfaceTypesMod  , only : nlevsclass
-
-  use FatesAllometryMod, only    : bleaf
-  use FatesAllometryMod, only    : bsap_allom
-  use FatesAllometryMod, only    : CrownDepth
-  use FatesHydraulicsMemMod, only: hydr_solver_1DTaylor
-  use FatesHydraulicsMemMod, only: hydr_solver_2DNewton
-  use FatesHydraulicsMemMod, only: hydr_solver_2DPicard
-  use FatesHydraulicsMemMod, only: ed_site_hydr_type
-  use FatesHydraulicsMemMod, only: ed_cohort_hydr_type
-  use FatesHydraulicsMemMod, only: n_hypool_plant
-  use FatesHydraulicsMemMod, only: n_hypool_leaf
-  use FatesHydraulicsMemMod, only: n_hypool_tot
-  use FatesHydraulicsMemMod, only: n_hypool_stem
-  use FatesHydraulicsMemMod, only: n_hypool_troot
-  use FatesHydraulicsMemMod, only: n_hypool_aroot
-  use FatesHydraulicsMemMod, only: n_plant_media
-  use FatesHydraulicsMemMod, only: nshell
-  use FatesHydraulicsMemMod, only: n_hypool_ag
-  use FatesHydraulicsMemMod, only: stomata_p_media
-  use FatesHydraulicsMemMod, only: leaf_p_media
-  use FatesHydraulicsMemMod, only: stem_p_media
-  use FatesHydraulicsMemMod, only: troot_p_media
-  use FatesHydraulicsMemMod, only: aroot_p_media
-  use FatesHydraulicsMemMod, only: rhiz_p_media
-  use FatesHydraulicsMemMod, only: nlevsoi_hyd_max
-  use FatesHydraulicsMemMod, only: rwccap, rwcft
-
-
-  use PRTGenericMod,          only : carbon12_element
-  use PRTGenericMod,          only : leaf_organ, fnrt_organ, sapw_organ
-  use PRTGenericMod,          only : store_organ, repro_organ, struct_organ
-  use PRTGenericMod,          only : num_elements
-  use PRTGenericMod,          only : element_list
-
-  use EDPftvarcon, only : EDPftvarcon_inst
-  use PRTParametersMod, only : prt_params
-
-
-  use FatesHydroWTFMod, only : wrf_arr_type
-  use FatesHydroWTFMod, only : wkf_arr_type
-  use FatesHydroWTFMod, only : wrf_type, wrf_type_vg, wrf_type_cch, wrf_type_tfs
-  use FatesHydroWTFMod, only : wkf_type, wkf_type_vg, wkf_type_cch, wkf_type_tfs
-  use FatesHydroWTFMod, only : wrf_type_smooth_cch, wkf_type_smooth_cch
-
-
-  ! CIME Globals
-  use shr_log_mod , only      : errMsg => shr_log_errMsg
-  use shr_infnan_mod   , only : isnan => shr_infnan_isnan
-
+  use shr_log_mod,              only : errMsg => shr_log_errMsg
+  use shr_infnan_mod,           only : isnan => shr_infnan_isnan
 
   implicit none
-
 
   ! 1=leaf, 2=stem, 3=troot, 4=aroot
   ! Several of these may be better transferred to the parameter file in due time (RGK)
@@ -1306,7 +1287,7 @@ subroutine InitHydrCohort(currentSite,currentCohort)
   type(fates_cohort_type), target :: currentCohort
   type(ed_cohort_hydr_type), pointer :: ccohort_hydr
 
-  if ( hlm_use_planthydro.eq.ifalse ) return
+  if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
   allocate(ccohort_hydr)
   currentCohort%co_hydr => ccohort_hydr
   call ccohort_hydr%AllocateHydrCohortArrays(currentSite%si_hydr%nlevrhiz)
@@ -1322,7 +1303,7 @@ subroutine DeallocateHydrCohort(currentCohort)
   type(fates_cohort_type), target :: currentCohort
   type(ed_cohort_hydr_type), pointer :: ccohort_hydr
 
-  if ( hlm_use_planthydro.eq.ifalse ) return
+  if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
 
   ccohort_hydr => currentCohort%co_hydr
   call ccohort_hydr%DeAllocateHydrCohortArrays()
@@ -1357,7 +1338,7 @@ subroutine InitHydrSites(sites,bc_in)
   integer, parameter :: rhizlayer_aggmeth_combine12 = 2
   integer, parameter :: rhizlayer_aggmeth_balN      = 3
 
-  if ( hlm_use_planthydro.eq.ifalse ) return
+  if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
 
   ! Initialize any derived hydraulics parameters
 
@@ -1716,7 +1697,7 @@ end subroutine HydrSiteColdStart
 
   bc_out%plant_stored_h2o_si = 0.0_r8
 
-  if( hlm_use_planthydro.eq.ifalse ) return
+  if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
 
     csite_hydr => csite%si_hydr
      csite_hydr%h2oveg = 0.0_r8
@@ -4282,7 +4263,7 @@ subroutine RecruitWaterStorage(nsites,sites,bc_out)
    type(ed_site_hydr_type), pointer :: csite_hydr
    integer :: s
 
-   if( hlm_use_planthydro.eq.ifalse ) return
+   if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
 
    do s = 1,nsites
 
@@ -6222,7 +6203,7 @@ subroutine InitHydroGlobals()
    real(r8) :: cap_slp      ! slope of capillary region of curve
    real(r8) :: cap_int      ! intercept of capillary region of curve
 
-   if(hlm_use_planthydro.eq.ifalse) return
+   if (.not. hlm_runtime_params_inst%get_use_planthydro()) return
 
    ! we allocate from stomata_p_media, which should be zero
 
