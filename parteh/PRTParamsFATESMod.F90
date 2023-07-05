@@ -3,36 +3,31 @@ module PRTInitParamsFatesMod
   ! This is a FATES specific module for loading parameters through
   ! the CLM/ELM module system.
 
-  use FatesConstantsMod, only : r8 => fates_r8
-  use FatesConstantsMod, only : itrue,ifalse
-  use FatesConstantsMod, only : nearzero
-  use FatesConstantsMod, only : years_per_day
-  use FatesConstantsMod, only : init_recruit_trim
-  use FatesInterfaceTypesMod, only : hlm_parteh_mode
-  use PRTParametersMod,  only : prt_params
-  use PRTGenericMod,     only : num_organ_types
-  use PRTGenericMod,     only : leaf_organ, fnrt_organ, store_organ
-  use PRTGenericMod,     only : sapw_organ, struct_organ, repro_organ
-  use PRTGenericMod,     only : nitrogen_element, phosphorus_element
-  use FatesGlobals,      only : endrun => fates_endrun
-  use FatesGlobals,      only : fates_log 
-  use shr_log_mod,       only : errMsg => shr_log_errMsg
-  use EDPftvarcon,       only : EDPftvarcon_inst
-  use PRTGenericMod,     only : prt_cnp_flex_allom_hyp,prt_carbon_allom_hyp
-  use FatesAllometryMod  , only : h_allom
-  use FatesAllometryMod  , only : h2d_allom
-  use FatesAllometryMod  , only : bagw_allom
-  use FatesAllometryMod  , only : bsap_allom
-  use FatesAllometryMod  , only : bleaf
-  use FatesAllometryMod  , only : bfineroot
-  use FatesAllometryMod  , only : bdead_allom
-  use FatesAllometryMod  , only : bstore_allom
-  use FatesAllometryMod  , only : bbgw_allom
-  use FatesAllometryMod  , only : carea_allom
-  use FatesAllometryMod  , only : CheckIntegratedAllometries
-  use FatesAllometryMod, only : set_root_fraction
-  use PRTGenericMod, only : StorageNutrientTarget
-  
+  use FatesConstantsMod,        only : r8 => fates_r8
+  use FatesConstantsMod,        only : itrue, ifalse
+  use FatesConstantsMod,        only : nearzero
+  use FatesConstantsMod,        only : years_per_day
+  use FatesConstantsMod,        only : init_recruit_trim
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
+  use PRTParametersMod,         only : prt_params
+  use PRTGenericMod,            only : num_organ_types
+  use PRTGenericMod,            only : leaf_organ, fnrt_organ, store_organ
+  use PRTGenericMod,            only : sapw_organ, struct_organ, repro_organ
+  use PRTGenericMod,            only : nitrogen_element, phosphorus_element
+  use FatesGlobals,             only : endrun => fates_endrun
+  use FatesGlobals,             only : fates_log 
+  use shr_log_mod,              only : errMsg => shr_log_errMsg
+  use EDPftvarcon,              only : EDPftvarcon_inst
+  use PRTGenericMod,            only : prt_cnp_flex_allom_hyp, prt_carbon_allom_hyp
+  use FatesAllometryMod,        only : h2d_allom
+  use FatesAllometryMod,        only : bagw_allom
+  use FatesAllometryMod,        only : bsap_allom
+  use FatesAllometryMod,        only : bleaf
+  use FatesAllometryMod,        only : bfineroot
+  use FatesAllometryMod,        only : bdead_allom
+  use FatesAllometryMod,        only : bstore_allom
+  use FatesAllometryMod,        only : bbgw_allom
+  use PRTGenericMod,            only : StorageNutrientTarget
   
   !
   ! !PUBLIC TYPES:
@@ -1014,7 +1009,7 @@ contains
 
      ! Check to make sure the organ ids are valid if this is the
      ! cnp_flex_allom_hypothesis
-     select case (hlm_parteh_mode)
+     select case (hlm_runtime_params_inst%get_parteh_mode())
      case (prt_carbon_allom_hyp,prt_cnp_flex_allom_hyp)
 
          do io = 1,norgans
@@ -1042,7 +1037,7 @@ contains
 
      ! Make sure that the N fixation respiration surcharge fraction is
      ! between 0 and 1
-     if (hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+     if (hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp) then
         if(any(prt_params%nfix_mresp_scfrac(:)<0._r8) .or. any(prt_params%nfix_mresp_scfrac(:)>1.0_r8)) then
            write(fates_log(),*) 'The N fixation surcharge nfix_mresp_sfrac (fates_nfix1) must be between 0-1.'
            write(fates_log(),*) 'here are the values: ',prt_params%nfix_mresp_scfrac(:)
@@ -1136,7 +1131,7 @@ contains
 
         end if
 
-        select case (hlm_parteh_mode)
+        select case (hlm_runtime_params_inst%get_parteh_mode())
         case (prt_cnp_flex_allom_hyp)
 
            ! Make sure nutrient storage fractions are positive
@@ -1228,7 +1223,7 @@ contains
 !           end if
 !        end if
 
-        select case (hlm_parteh_mode)
+        select case (hlm_runtime_params_inst%get_parteh_mode())
         case (prt_carbon_allom_hyp,prt_cnp_flex_allom_hyp)
            ! The first nitrogen stoichiometry is used in all cases
            if ( (any(prt_params%nitr_stoich_p1(ipft,:) < 0.0_r8)) .or. &
@@ -1241,7 +1236,7 @@ contains
            end if
         end select
 
-        select case (hlm_parteh_mode)
+        select case (hlm_runtime_params_inst%get_parteh_mode())
         case (prt_cnp_flex_allom_hyp)
 
            do i = 1,norgans

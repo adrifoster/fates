@@ -19,9 +19,6 @@ module FatesCohortMod
   use PRTParametersMod,           only : prt_params
   use FatesParameterDerivedMod,   only : param_derived
   use FatesHydraulicsMemMod,      only : ed_cohort_hydr_type
-  use FatesInterfaceTypesMod,     only : hlm_parteh_mode
-  use FatesInterfaceTypesMod,     only : hlm_use_sp
-  use FatesInterfaceTypesMod,     only : hlm_use_planthydro
   use FatesInterfaceTypesMod,     only : nleafage
   use EDPftvarcon,                only : EDPftvarcon_inst
   use FatesSizeAgeTypeIndicesMod, only : sizetype_class_index
@@ -516,7 +513,7 @@ module FatesCohortMod
     !=====================================================================================
 
     subroutine Create(this, prt, pft, nn, hite, coage, dbh, status,                      &
-      ctrim, carea, clayer, crowndamage, spread, can_tlai)
+      ctrim, carea, clayer, crowndamage, spread, can_tlai, parteh_mode, use_sp)
       !
       ! DESCRIPTION:
       ! set up values for a newly created cohort
@@ -536,6 +533,8 @@ module FatesCohortMod
       real(r8),                 intent(in)             :: spread           ! how spread crowns are in horizontal space
       real(r8),                 intent(in)             :: carea            ! area of cohort, for SP mode [m2]
       real(r8),                 intent(in)             :: can_tlai(nclmax) ! patch-level total LAI of each leaf layer
+      integer,                  intent(in)             :: parteh_mode      ! PARTEH hypothesis being used
+      logical,                  intent(in)             :: use_sp           ! is SP mode on?
 
       ! LOCAL VARIABLES:
       integer  :: iage        ! loop counter for leaf age classes
@@ -573,7 +572,7 @@ module FatesCohortMod
       ! initialized with full stores, which match with minimum fineroot biomass
       this%l2fr = prt_params%allom_l2fr(pft)
 
-      if (hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+      if (parteh_mode .eq. prt_cnp_flex_allom_hyp) then
         this%cx_int      = 0._r8  ! Assume balanced N,P/C stores ie log(1) = 0
         this%cx0         = 0._r8  ! Assume balanced N,P/C stores ie log(1) = 0
         this%ema_dcxdt   = 0._r8  ! Assume unchanged dCX/dt
@@ -596,7 +595,7 @@ module FatesCohortMod
         this%coage_by_pft_class)
 
       ! asssign or calculate canopy extent and depth
-      if (hlm_use_sp .eq. ifalse) then
+      if (.not. use_sp) then
         call carea_allom(this%dbh, this%n, spread, this%pft, this%crowndamage,           &
           this%c_area)
       else
@@ -611,7 +610,7 @@ module FatesCohortMod
       this%treelai = tree_lai(leaf_c, this%pft, this%c_area, this%n,                     &
         this%canopy_layer, can_tlai, this%vcmax25top)
 
-      if (hlm_use_sp .eq. ifalse) then
+      if (.not. use_sp) then
         this%treesai = tree_sai(this%pft, this%dbh, this%crowndamage,                    &
           this%canopy_trim, this%c_area, this%n, this%canopy_layer, can_tlai,            &
           this%treelai,this%vcmax25top, 2)
@@ -623,15 +622,17 @@ module FatesCohortMod
 
     !=====================================================================================
 
-    subroutine Copy(this, copyCohort) 
+    subroutine Copy(this, copyCohort, parteh_mode, use_planthydro) 
       !
       ! DESCRIPTION:
       ! copies all the variables in one cohort into a new cohort
       !
 
       ! ARGUMENTS
-      class(fates_cohort_type), intent(in)    :: this       ! old cohort 
-      class(fates_cohort_type), intent(inout) :: copyCohort ! new cohort
+      class(fates_cohort_type), intent(in)    :: this           ! old cohort 
+      class(fates_cohort_type), intent(inout) :: copyCohort     ! new cohort
+      integer,                  intent(in)    :: parteh_mode    ! PARTEH hypothesis being used
+      logical,                  intent(in)    :: use_planthydro ! is plant hydraulics on?
 
       copyCohort%indexnumber = fates_unset_int
       
@@ -689,7 +690,7 @@ module FatesCohortMod
       copyCohort%year_net_uptake         = this%year_net_uptake
       copyCohort%cnp_limiter             = this%cnp_limiter
 
-      if (hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then 
+      if (parteh_mode .eq. prt_cnp_flex_allom_hyp) then 
         copyCohort%cx_int                  = this%cx_int
         copyCohort%ema_dcxdt               = this%ema_dcxdt
         copyCohort%cx0                     = this%cx0
@@ -749,7 +750,7 @@ module FatesCohortMod
       copyCohort%fire_mort               = this%fire_mort
 
       ! HYDRAULICS
-      if (hlm_use_planthydro .eq. itrue) then
+      if (use_planthydro) then
         call copyCohort%co_hydr%CopyCohortHydraulics(this%co_hydr)
       endif
 
@@ -757,7 +758,7 @@ module FatesCohortMod
 
     !=====================================================================================
 
-    subroutine FreeMemory(this)
+    subroutine FreeMemory(this, use_planthydro)
       !
       ! DESCRIPTION:
       ! deallocates all dynamic memory and objects within the cohort structure
@@ -766,13 +767,15 @@ module FatesCohortMod
 
       ! ARGUMENTS
       class(fates_cohort_type), intent(inout) :: this ! cohort object
+      logical,                  intent(in)    :: use_planthydro
+
 
       ! LOCALS:
       integer            :: istat ! return status code
       character(len=255) :: smsg  ! error message
  
       ! at this point, nothing should be pointing to current cohort
-      if (hlm_use_planthydro .eq. itrue) then
+      if (use_planthydro) then
         call this%co_hydr%DeAllocateHydrCohortArrays()
         deallocate(this%co_hydr)
       end if
@@ -791,7 +794,7 @@ module FatesCohortMod
 
     !=====================================================================================
   
-    subroutine InitPRTBoundaryConditions(this)      
+    subroutine InitPRTBoundaryConditions(this, parteh_mode)      
       !
       ! DESCRIPTION:
       ! Set the boundary conditions that flow in an out of the PARTEH
@@ -814,8 +817,9 @@ module FatesCohortMod
       
       ! ARGUMENTS:
       class(fates_cohort_type), intent(inout), target :: this
+      integer,                  intent(in)            :: parteh_mode
       
-      select case(hlm_parteh_mode)
+      select case(parteh_mode)
       case (prt_carbon_allom_hyp)
    
         ! Register boundary conditions for the Carbon Only Allometric Hypothesis
@@ -867,7 +871,7 @@ module FatesCohortMod
    
     !=====================================================================================
 
-    subroutine UpdateCohortBioPhysRates(this)
+    subroutine UpdateCohortBioPhysRates(this, use_sp)
       !
       ! DESCRIPTION:
       ! Update the four key biophysical rates of leaves based on the changes 
@@ -879,7 +883,8 @@ module FatesCohortMod
       ! of different age classes are unchanged until the next day.
 
       ! ARGUMENTS
-      class(fates_cohort_type), intent(inout) :: this ! cohort object
+      class(fates_cohort_type), intent(inout) :: this   ! cohort object
+      logical,                  intent(in)    :: use_sp ! is SP mode on?
 
       ! LOCAL VARIABLES
       real(r8) :: frac_leaf_aclass(max_nleafage)  ! fraction of leaves in each age-class
@@ -898,7 +903,7 @@ module FatesCohortMod
 
       ipft = this%pft
 
-      if (sum(frac_leaf_aclass(1:nleafage)) > nearzero .and. hlm_use_sp .eq. ifalse) then
+      if (sum(frac_leaf_aclass(1:nleafage)) > nearzero .and. .not. use_sp) then
 
         frac_leaf_aclass(1:nleafage) = frac_leaf_aclass(1:nleafage)/                     &
           sum(frac_leaf_aclass(1:nleafage))
@@ -915,7 +920,7 @@ module FatesCohortMod
         this%kp25top = sum(param_derived%kp25top(ipft, 1:nleafage)*                      &
           frac_leaf_aclass(1:nleafage))
 
-      else if (hlm_use_sp .eq. itrue) then
+      else if (use_sp) then
           
         this%vcmax25top = EDPftvarcon_inst%vcmax25top(ipft, 1)
         this%jmax25top = param_derived%jmax25top(ipft, 1)

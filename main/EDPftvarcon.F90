@@ -6,28 +6,28 @@ module EDPftvarcon
   ! read and initialize vegetation (PFT) constants.
   !
   ! !USES:
-  use FatesConstantsMod,   only : maxSWb, ivis, inir
-  use FatesConstantsMod, only : r8 => fates_r8
-  use FatesConstantsMod, only : nearzero
-  use FatesConstantsMod, only : itrue, ifalse
-  use PRTParametersMod, only : prt_params
-  use FatesGlobals,   only : fates_log
-  use FatesGlobals,   only : endrun => fates_endrun
-  use FatesLitterMod, only : ilabile,icellulose,ilignin
-  use PRTGenericMod,  only : leaf_organ, fnrt_organ, store_organ
-  use PRTGenericMod,  only : sapw_organ, struct_organ, repro_organ
-  use PRTGenericMod,  only : prt_cnp_flex_allom_hyp,prt_carbon_allom_hyp
-  use FatesInterfaceTypesMod, only : hlm_nitrogen_spec, hlm_phosphorus_spec
-  use FatesInterfaceTypesMod, only : hlm_parteh_mode
-  use FatesInterfaceTypesMod, only : hlm_nu_com
-  use FatesConstantsMod   , only : prescribed_p_uptake
-  use FatesConstantsMod   , only : prescribed_n_uptake
-  use FatesConstantsMod   , only : coupled_p_uptake
-  use FatesConstantsMod   , only : coupled_n_uptake
-
-
-   ! CIME Globals
-  use shr_log_mod ,   only : errMsg => shr_log_errMsg
+  use FatesConstantsMod,        only : maxSWb, ivis, inir
+  use FatesConstantsMod,        only : r8 => fates_r8
+  use FatesConstantsMod,        only : itrue, ifalse
+  use FatesConstantsMod,        only : fates_check_param_set
+  use FatesConstantsMod,        only : nearzero
+  use FatesConstantsMod,        only : itrue, ifalse
+  use EDParamsMod,              only : logging_mechanical_frac, logging_collateral_frac
+  use EDParamsMod,              only : logging_direct_frac
+  use PRTParametersMod,         only : prt_params
+  use FatesGlobals,             only : fates_log
+  use FatesGlobals,             only : endrun => fates_endrun
+  use FatesLitterMod,           only : ilabile, icellulose, ilignin
+  use PRTGenericMod,            only : leaf_organ, fnrt_organ
+  use PRTGenericMod,            only : prt_cnp_flex_allom_hyp, prt_carbon_allom_hyp
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
+  use FatesParametersInterface, only : fates_parameters_type, param_string_length
+  use FatesParametersInterface, only : dimension_name_pft, dimension_shape_1d
+  use FatesParametersInterface, only : dimension_name_hlm_pftno, dimension_shape_2d
+  use FatesParametersInterface, only : max_dimensions
+  use FatesParametersInterface, only : dimension_name_leaf_age, dimension_name_hydr_organs
+  
+  use shr_log_mod,              only : errMsg => shr_log_errMsg
 
   !
   ! !PUBLIC TYPES:
@@ -277,20 +277,12 @@ contains
   !-----------------------------------------------------------------------
   subroutine EDpftconInit(this)
 
-    use shr_infnan_mod , only : nan => shr_infnan_nan, assignment(=)
-
-    implicit none
-
     class(EDPftvarcon_type), intent(inout) :: this
 
   end subroutine EDpftconInit
 
   !-----------------------------------------------------------------------
   subroutine Register(this, fates_params)
-
-    use FatesParametersInterface, only : fates_parameters_type
-
-    implicit none
 
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
@@ -305,10 +297,6 @@ contains
   !-----------------------------------------------------------------------
   subroutine Receive(this, fates_params)
 
-    use FatesParametersInterface, only : fates_parameters_type
-
-    implicit none
-
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
 
@@ -321,12 +309,6 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine Register_PFT(this, fates_params)
-
-    use FatesParametersInterface, only : fates_parameters_type, param_string_length
-    use FatesParametersInterface, only : dimension_name_pft, dimension_shape_1d
-    use FatesParametersInterface, only : dimension_name_hlm_pftno, dimension_shape_2d
-
-    implicit none
 
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
@@ -685,10 +667,6 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine Receive_PFT(this, fates_params)
-
-    use FatesParametersInterface, only : fates_parameters_type, param_string_length
-
-    implicit none
 
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
@@ -1049,10 +1027,6 @@ contains
     ! currently stored in the parameter file as separate 1-d
     ! arrays. We have to register the parameters as 1-d arrays as they
     ! are on the parameter file. We store them as 2-d in the receive step.
-    use FatesParametersInterface, only : fates_parameters_type, param_string_length
-    use FatesParametersInterface, only : dimension_name_pft, dimension_shape_1d
-
-    implicit none
 
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
@@ -1108,10 +1082,6 @@ contains
     ! and copy. All parameters in this subroutine are sized the same,
     ! so we can reused the dummy array. If someone wants to cleanup
     ! the input file, all this complexity can be removed.
-    use FatesParametersInterface, only : fates_parameters_type
-    use FatesParametersInterface, only : param_string_length, max_dimensions
-
-    implicit none
 
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
@@ -1212,12 +1182,6 @@ contains
 
   subroutine Register_PFT_leafage(this, fates_params)
 
-    use FatesParametersInterface, only : fates_parameters_type, param_string_length
-    use FatesParametersInterface, only : max_dimensions, dimension_name_leaf_age
-    use FatesParametersInterface, only : dimension_name_pft, dimension_shape_2d
-
-    implicit none
-
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
 
@@ -1243,11 +1207,6 @@ contains
 
   subroutine Receive_PFT_leafage(this, fates_params)
 
-     use FatesParametersInterface, only : fates_parameters_type
-     use FatesParametersInterface, only : param_string_length
-
-     implicit none
-
      class(EDPftvarcon_type), intent(inout) :: this
      class(fates_parameters_type), intent(inout) :: fates_params
 
@@ -1263,12 +1222,6 @@ contains
   ! =====================================================================================
 
   subroutine Register_PFT_hydr_organs(this, fates_params)
-
-    use FatesParametersInterface, only : fates_parameters_type, param_string_length
-    use FatesParametersInterface, only : max_dimensions, dimension_name_hydr_organs
-    use FatesParametersInterface, only : dimension_name_pft, dimension_shape_2d
-
-    implicit none
 
     class(EDPftvarcon_type), intent(inout) :: this
     class(fates_parameters_type), intent(inout) :: fates_params
@@ -1347,11 +1300,6 @@ contains
   !-----------------------------------------------------------------------
 
   subroutine Receive_PFT_hydr_organs(this, fates_params)
-
-     use FatesParametersInterface, only : fates_parameters_type
-     use FatesParametersInterface, only : param_string_length
-
-     implicit none
 
      class(EDPftvarcon_type), intent(inout) :: this
      class(fates_parameters_type), intent(inout) :: fates_params
@@ -1538,34 +1486,29 @@ contains
      ! cannot have a structural biomass allometry intercept of 0, and a non-woody
      ! plant (grass) can't have a non-zero intercept...
      ! -----------------------------------------------------------------------------------
-    use FatesConstantsMod  , only : fates_check_param_set
-    use FatesConstantsMod  , only : itrue, ifalse
-    use EDParamsMod        , only : logging_mechanical_frac, logging_collateral_frac
-    use EDParamsMod        , only : logging_direct_frac
-    use FatesInterfaceTypesMod, only : hlm_use_fixed_biogeog
-    use FatesInterfaceTypesMod, only : hlm_use_inventory_init
 
      ! Argument
      logical, intent(in) :: is_master    ! Only log if this is the master proc
 
-     character(len=32),parameter :: fmt0 = '(a,100(F12.4,1X))'
+     character(len=32), parameter :: fmt0 = '(a,100(F12.4,1X))'
 
-     integer :: npft     ! number of PFTs
-     integer :: ipft     ! pft index
-     integer :: nleafage ! size of the leaf age class array
-     integer :: iage     ! leaf age class index
-     integer :: norgans  ! size of the plant organ dimension
-     integer  :: hlm_pft    ! used in fixed biogeog mode
-     integer  :: fates_pft  ! used in fixed biogeog mode
-
-     real(r8) :: sumarea    ! area of PFTs in nocomp mode.
+     integer           :: npft       ! number of PFTs
+     integer           :: ipft       ! pft index
+     integer           :: nleafage   ! size of the leaf age class array
+     integer           :: iage       ! leaf age class index
+     integer           :: norgans    ! size of the plant organ dimension
+     integer           :: hlm_pft    ! used in fixed biogeog mode
+     integer           :: fates_pft  ! used in fixed biogeog mode
+     character(len=16) :: hlm_nu_com ! which soil nutrient competition scheme is in use.
+     real(r8)          :: sumarea    ! area of PFTs in nocomp mode.
 
      npft = size(EDPftvarcon_inst%freezetol,1)
+     hlm_nu_com = hlm_runtime_params_inst%get_nutrient_scheme()
 
      if(.not.is_master) return
 
 
-     select case (hlm_parteh_mode)
+     select case (hlm_runtime_params_inst%get_parteh_mode())
      case (prt_cnp_flex_allom_hyp)
 
         ! Check to see if either RD/ECA/MIC is turned on
@@ -1581,7 +1524,7 @@ contains
         
         ! If nitrogen is turned on, check to make sure there are valid ammonium
         ! parameters
-        if(hlm_nitrogen_spec>0)then
+        if (hlm_runtime_params_inst%get_nitrogen_spec() > 0) then
            if (trim(hlm_nu_com).eq.'ECA') then
 
               if(any(EDpftvarcon_inst%eca_km_nh4(:)<0._r8) ) then
@@ -1591,7 +1534,7 @@ contains
                  call endrun(msg=errMsg(sourcefile, __LINE__))
               end if
 
-              if(hlm_nitrogen_spec==2)then
+              if (hlm_runtime_params_inst%get_nitrogen_spec() == 2) then
                  if(any(EDpftvarcon_inst%eca_km_no3(:)<0._r8)) then
                     write(fates_log(),*) 'ECA with nit/denitr is turned on'
                     write(fates_log(),*) 'bad ECA km value(s) for no3: ',EDpftvarcon_inst%eca_km_no3(:)
@@ -1788,8 +1731,8 @@ contains
         ! Check that in initial density is not equal to zero in a cold-start run
         !-----------------------------------------------------------------------------------
         
-        if ( hlm_use_inventory_init == ifalse .and. & 
-             abs( EDPftvarcon_inst%initd(ipft) ) < nearzero ) then
+        if (.not. hlm_runtime_params_inst%get_use_inventory_init() .and.                 & 
+          abs(EDPftvarcon_inst%initd(ipft)) < nearzero) then
           
            write(fates_log(),*) ' In a cold start run initial density cannot be zero.'
            write(fates_log(),*) ' For a bare ground run set to initial recruit density.'
@@ -1836,7 +1779,7 @@ contains
 
         end if
 
-        if( hlm_use_fixed_biogeog .eq. itrue ) then
+        if (hlm_runtime_params_inst%get_use_fixed_biogeog()) then
            ! check that the host-fates PFT map adds to one along HLM dimension so that all the HLM area
            ! goes to a FATES PFT.  Each FATES PFT can get < or > 1 of an HLM PFT.
            do hlm_pft = 1,size( EDPftvarcon_inst%hlm_pft_map,2)
