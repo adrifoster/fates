@@ -37,11 +37,7 @@ module EDPhysiologyMod
   use FatesInterfaceTypesMod,   only : numpft
   use FatesInterfaceTypesMod,   only : nleafage
   use FatesInterfaceTypesMod,   only : nlevdamage
-  use FatesInterfaceTypesMod,   only : hlm_use_planthydro
-  use FatesInterfaceTypesMod,   only : hlm_parteh_mode
-  use FatesInterfaceTypesMod,   only : hlm_use_nocomp
-  use FatesInterfaceTypesMod,   only : hlm_use_tree_damage
-  use FatesInterfaceTypesMod,   only : hlm_use_ed_prescribed_phys
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
   use EDParamsMod,              only : dinc_vai, dlower_vai
   use EDParamsMod,              only : q10_mr
   use EDParamsMod,              only : q10_froz
@@ -221,7 +217,7 @@ contains
     real(r8) :: dcmpy_frac       ! fraction of mass going to each decomposition pool
     real(r8) :: SF_val_CWD_frac_adj(4) !SF_val_CWD_frac adjusted based on cohort dbh 
     
-    if(hlm_use_tree_damage .ne. itrue) return
+    if (.not. hlm_runtime_params_inst%get_use_tree_damage()) return
 
     if(.not.damage_time) return
 
@@ -248,7 +244,7 @@ contains
 
              ! Create a new damaged cohort
              allocate(ndcohort)  ! new cohort surviving but damaged
-             if(hlm_use_planthydro.eq.itrue) call InitHydrCohort(csite,ndcohort)
+             if (hlm_runtime_params_inst%get_use_planthydro()) call InitHydrCohort(csite, ndcohort)
              
              ! Initialize the PARTEH object and point to the
              ! correct boundary condition fields
@@ -2030,7 +2026,8 @@ contains
       ! If nocomp is enabled, then we must determine whether a given PFT is allowed on a given patch or not.
 
       if (currentSite%use_this_pft(ft) .eq. itrue  .and.                                 &
-        ((hlm_use_nocomp .eq. ifalse) .or. (ft .eq. currentPatch%nocomp_pft_label))) then
+        ((.not. hlm_runtime_params_inst%get_use_nocomp()) .or.                           &
+        (ft .eq. currentPatch%nocomp_pft_label))) then
 
         hite               = EDPftvarcon_inst%hgt_min(ft)
         stem_drop_fraction = EDPftvarcon_inst%phen_stem_drop_fraction(ft)
@@ -2083,8 +2080,8 @@ contains
 
         ! cycle through available carbon and nutrients, find the limiting element
         ! to dictate the total number of plants that can be generated
-        if ((hlm_use_ed_prescribed_phys .eq. ifalse) .or.                                &
-          (EDPftvarcon_inst%prescribed_recruitment(ft) .lt. 0._r8) ) then
+        if ((.not.hlm_runtime_params_inst%get_use_ed_prescribed_phys()) .or.             &
+          (EDPftvarcon_inst%prescribed_recruitment(ft) .lt. 0._r8)) then
 
           cohort_n = 1.e20_r8
 
@@ -2187,7 +2184,7 @@ contains
 
             end select
 
-            select case(hlm_parteh_mode)
+            select case(hlm_runtime_params_inst%get_parteh_mode())
             case (prt_carbon_allom_hyp, prt_cnp_flex_allom_hyp)
 
               ! put all of the leaf mass into the first bin
@@ -2214,7 +2211,7 @@ contains
             ! seed_germination model, so we have to short circuit things.  We send all of the
             ! seed germination mass to an outflux pool, and use an arbitrary generic input flux
             ! to balance out the new recruits.
-            if ((hlm_use_ed_prescribed_phys .eq. itrue) .and.                            &
+            if ((hlm_runtime_params_inst%get_use_ed_prescribed_phys()) .and.             &
               (EDPftvarcon_inst%prescribed_recruitment(ft) .ge. 0._r8)) then
 
               site_mass%flux_generic_in = site_mass%flux_generic_in +                    &
@@ -2763,7 +2760,7 @@ contains
     
     ! Difference in dbh (cm) to consider a plant was recruited fairly recently
 
-    if(hlm_parteh_mode .ne. prt_cnp_flex_allom_hyp) return
+    if (hlm_runtime_params_inst%get_parteh_mode() .ne. prt_cnp_flex_allom_hyp) return
     
     rec_n(1:numpft,1:nclmax) = 0._r8
     rec_l2fr0(1:numpft,1:nclmax) = 0._r8
@@ -2825,7 +2822,7 @@ contains
     ! Update the total plant stoichiometry of a new recruit, based on the updated
     ! L2FR values
 
-    if(hlm_parteh_mode .ne. prt_cnp_flex_allom_hyp) return
+    if (hlm_runtime_params_inst%get_parteh_mode() .ne. prt_cnp_flex_allom_hyp) return
     
     cpatch => csite%youngest_patch
     do while(associated(cpatch))
@@ -2863,7 +2860,7 @@ contains
     type(fates_cohort_type), pointer :: ccohort
     integer :: ft,cl
     
-    if(hlm_parteh_mode .ne. prt_cnp_flex_allom_hyp) return
+    if (hlm_runtime_params_inst%get_parteh_mode() .ne. prt_cnp_flex_allom_hyp) return
     
     cpatch => csite%youngest_patch
     do while(associated(cpatch))

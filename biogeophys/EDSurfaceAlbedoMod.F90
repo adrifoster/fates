@@ -19,7 +19,8 @@ module EDSurfaceRadiationMod
   use FatesConstantsMod , only : nocomp_bareground
   use FatesInterfaceTypesMod , only : bc_in_type
   use FatesInterfaceTypesMod , only : bc_out_type
-  use FatesInterfaceTypesMod , only : hlm_numSWb
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
+  !use FatesInterfaceTypesMod , only : num_swb
   use FatesInterfaceTypesMod , only : numpft
   use FatesConstantsMod        , only : maxSWb
   use FatesConstantsMod        , only : nclmax
@@ -83,6 +84,7 @@ contains
     integer :: s                                   ! site loop counter
     integer :: ifp                                 ! patch loop counter
     integer :: ib                                  ! radiation broad band counter
+    integer :: num_swb
     type(fates_patch_type), pointer :: currentPatch   ! patch pointer
 
     !-----------------------------------------------------------------------
@@ -93,7 +95,7 @@ contains
     ! RGK,2016-08-06: FATES is still incompatible with VOC emission module
     ! -------------------------------------------------------------------------------
 
-
+    num_swb = hlm_runtime_params_inst%get_num_swb()
     do s = 1, nsites
 
        ifp = 0
@@ -121,8 +123,8 @@ contains
 
              currentPatch%solar_zenith_flag         = bc_in(s)%filter_vegzen_pa(ifp)
              currentPatch%solar_zenith_angle        = bc_in(s)%coszen_pa(ifp)
-             currentPatch%gnd_alb_dif(1:hlm_numSWb) = bc_in(s)%albgr_dif_rb(1:hlm_numSWb)
-             currentPatch%gnd_alb_dir(1:hlm_numSWb) = bc_in(s)%albgr_dir_rb(1:hlm_numSWb)
+             currentPatch%gnd_alb_dif(1:num_swb) = bc_in(s)%albgr_dif_rb(1:num_swb)
+             currentPatch%gnd_alb_dir(1:num_swb) = bc_in(s)%albgr_dir_rb(1:num_swb)
              currentPatch%fcansno                   = bc_in(s)%fcansno_pa(ifp)
 
              if(currentPatch%solar_zenith_flag )then
@@ -142,7 +144,7 @@ contains
                    bc_out(s)%fabi_parb(ifp,:) = 0.0_r8
                    currentPatch%radiation_error = 0.0_r8
 
-                   do ib = 1,hlm_numSWb
+                   do ib = 1,num_swb
                       bc_out(s)%albd_parb(ifp,ib) = bc_in(s)%albgr_dir_rb(ib)
                       bc_out(s)%albi_parb(ifp,ib) = bc_in(s)%albgr_dif_rb(ib)
                       bc_out(s)%ftdd_parb(ifp,ib)= 1.0_r8
@@ -160,7 +162,8 @@ contains
                         bc_out(s)%fabi_parb(ifp,:), &
                         bc_out(s)%ftdd_parb(ifp,:), &
                         bc_out(s)%ftid_parb(ifp,:), &
-                        bc_out(s)%ftii_parb(ifp,:))
+                        bc_out(s)%ftii_parb(ifp,:), &
+                        num_swb)
 
 
                 endif ! is there vegetation?
@@ -184,7 +187,8 @@ contains
        fabi_parb_out, &   ! (ifp,ib)
        ftdd_parb_out, &   ! (ifp,ib)
        ftid_parb_out, &   ! (ifp,ib)
-       ftii_parb_out)     ! (ifp,ib)
+       ftii_parb_out, &
+       num_swb)     ! (ifp,ib)
 
     ! -----------------------------------------------------------------------------------
     !
@@ -202,13 +206,14 @@ contains
     ! -----------------------------------------------------------------------------------
 
     type(fates_patch_type), intent(inout), target :: currentPatch
-    real(r8), intent(inout) :: albd_parb_out(hlm_numSWb)
-    real(r8), intent(inout) :: albi_parb_out(hlm_numSWb)
-    real(r8), intent(inout) :: fabd_parb_out(hlm_numSWb)
-    real(r8), intent(inout) :: fabi_parb_out(hlm_numSWb)
-    real(r8), intent(inout) :: ftdd_parb_out(hlm_numSWb)
-    real(r8), intent(inout) :: ftid_parb_out(hlm_numSWb)
-    real(r8), intent(inout) :: ftii_parb_out(hlm_numSWb)
+    integer,  intent(in)    :: num_swb
+    real(r8), intent(inout) :: albd_parb_out(num_swb)
+    real(r8), intent(inout) :: albi_parb_out(num_swb)
+    real(r8), intent(inout) :: fabd_parb_out(num_swb)
+    real(r8), intent(inout) :: fabi_parb_out(num_swb)
+    real(r8), intent(inout) :: ftdd_parb_out(num_swb)
+    real(r8), intent(inout) :: ftid_parb_out(num_swb)
+    real(r8), intent(inout) :: ftii_parb_out(num_swb)
 
     ! Locals
     ! -----------------------------------------------------------------------------------
@@ -299,13 +304,13 @@ contains
 
     ! Initialize the ouput arrays
     ! ---------------------------------------------------------------------------------
-    albd_parb_out(1:hlm_numSWb) = 0.0_r8
-    albi_parb_out(1:hlm_numSWb) = 0.0_r8
-    fabd_parb_out(1:hlm_numSWb) = 0.0_r8
-    fabi_parb_out(1:hlm_numSWb) = 0.0_r8
-    ftdd_parb_out(1:hlm_numSWb) = 1.0_r8
-    ftid_parb_out(1:hlm_numSWb) = 1.0_r8
-    ftii_parb_out(1:hlm_numSWb) = 1.0_r8
+    albd_parb_out(1:num_swb) = 0.0_r8
+    albi_parb_out(1:num_swb) = 0.0_r8
+    fabd_parb_out(1:num_swb) = 0.0_r8
+    fabi_parb_out(1:num_swb) = 0.0_r8
+    ftdd_parb_out(1:num_swb) = 1.0_r8
+    ftid_parb_out(1:num_swb) = 1.0_r8
+    ftii_parb_out(1:num_swb) = 1.0_r8
 
     ! Is this pft/canopy layer combination present in this patch?
     rho_layer(:,:,:,:)=0.0_r8
@@ -329,7 +334,7 @@ contains
                frac_sai = 1.0_r8 - frac_lai
 
                ! layer level reflectance qualities
-               do ib = 1,hlm_numSWb !vis, nir
+               do ib = 1,num_swb !vis, nir
 
                    rho_layer(L,ft,iv,ib)=frac_lai*rhol(ft,ib)+frac_sai*rhos(ft,ib)
                    tau_layer(L,ft,iv,ib)=frac_lai*taul(ft,ib)+frac_sai*taus(ft,ib)
@@ -400,7 +405,7 @@ contains
 
           weighted_dir_tr(L)                 = 0.0_r8
           weighted_fsun(L)                   = 0._r8
-          weighted_dif_ratio(L,1:hlm_numSWb) = 0._r8
+          weighted_dif_ratio(L,1:num_swb) = 0._r8
 
           !Each canopy layer (canopy, understorey) has multiple 'parallel' pft's
 
@@ -551,7 +556,7 @@ contains
                 ! Iterative solution do scattering
                 !==============================================================================!
 
-                do ib = 1,hlm_numSWb !vis, nir
+                do ib = 1,num_swb !vis, nir
                    !++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++!
                    ! Leaf scattering coefficient and terms do diffuse radiation reflected
                    ! and transmitted by a layer
@@ -591,7 +596,7 @@ contains
                    weighted_dif_ratio(L,ib) = weighted_dif_ratio(L,ib) + &
                         dif_ratio(L,ft,1,ib) * ftweight(L,ft,1)
                    !instance where the first layer ftweight is used a proxy for the whole column. FTWA
-                end do!hlm_numSWb
+                end do!num_swb
              endif ! currentPatch%canopy_mask
           end do!ft
        end do!L
@@ -599,7 +604,7 @@ contains
        ! Zero out the radiation error for the current patch before conducting the conservation check
        currentPatch%radiation_error = 0.0_r8
 
-       do ib = 1,hlm_numSWb
+       do ib = 1,num_swb
           Dif_dn(:,:,:) = 0.00_r8
           Dif_up(:,:,:) = 0.00_r8
           do L = 1, currentPatch%NCL_p !work down from the top of the canopy.
@@ -1101,7 +1106,7 @@ contains
              end if
              
           end if
-       end do !hlm_numSWb
+       end do !num_swb
 
     enddo ! rad-type
 

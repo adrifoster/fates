@@ -34,8 +34,7 @@ module FATESPlantRespPhotosynthMod
   use FatesConstantsMod, only : nocomp_bareground
   use FatesConstantsMod, only : photosynth_acclim_model_none
   use FatesConstantsMod, only : photosynth_acclim_model_kumarathunge_etal_2019
-  use FatesInterfaceTypesMod, only : hlm_use_planthydro
-  use FatesInterfaceTypesMod, only : hlm_parteh_mode
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
   use FatesInterfaceTypesMod, only : numpft
   use FatesInterfaceTypesMod, only : nleafage
   use FatesConstantsMod, only : maxpft
@@ -144,8 +143,6 @@ contains
     use FatesAllometryMod, only : decay_coeff_kn
 
     use DamageMainMod, only : GetCrownReduction
-
-    use FatesInterfaceTypesMod, only : hlm_use_tree_damage
     
     ! ARGUMENTS:
     ! -----------------------------------------------------------------------------------
@@ -442,11 +439,11 @@ contains
                             ! ------------------------------------------------------------
 
                             rate_mask_if: if ( .not.rate_mask_z(iv,ft,cl) .or. &
-                                 (hlm_use_planthydro.eq.itrue) .or. &
+                                 (hlm_runtime_params_inst%get_use_planthydro()) .or. &
                                  (nleafage > 1) .or. &
-                                 (hlm_parteh_mode .ne. prt_carbon_allom_hyp )   ) then
+                                 (hlm_runtime_params_inst%get_parteh_mode() .ne. prt_carbon_allom_hyp)) then
 
-                               if (hlm_use_planthydro.eq.itrue ) then
+                               if (hlm_runtime_params_inst%get_use_planthydro()) then
                                   
                                   stomatal_intercept_btran = max( cf/rsmax0,stomatal_intercept(ft)*currentCohort%co_hydr%btran )
                                   btran_eff = currentCohort%co_hydr%btran 
@@ -506,7 +503,7 @@ contains
 
                                ! Then scale this value at the top of the canopy for canopy depth
                                ! Leaf nitrogen concentration at the top of the canopy (g N leaf / m**2 leaf)
-                               select case(hlm_parteh_mode)
+                               select case(hlm_runtime_params_inst%get_parteh_mode())
                                case (prt_carbon_allom_hyp)
 
                                   lnc_top  = prt_params%nitr_stoich_p1(ft,prt_params%organ_param_id(leaf_organ))/slatop(ft)
@@ -685,7 +682,7 @@ contains
                       sapw_c   = currentCohort%prt%GetState(sapw_organ, carbon12_element)
                       fnrt_c   = currentCohort%prt%GetState(fnrt_organ, carbon12_element)
 
-                      if (hlm_use_tree_damage .eq. itrue) then
+                      if (hlm_runtime_params_inst%get_use_tree_damage()) then
                          
                          ! Crown damage currenly only reduces the aboveground portion of 
                          ! sapwood. Therefore we calculate the aboveground and the belowground portion 
@@ -708,7 +705,7 @@ contains
                       sapw_c_agw = sapw_c - sapw_c_bgw                         
                      
    
-                      select case(hlm_parteh_mode)
+                      select case(hlm_runtime_params_inst%get_parteh_mode())
                       case (prt_carbon_allom_hyp)
 
                          live_stem_n = sapw_c_agw * prt_params%nitr_stoich_p1(ft,prt_params%organ_param_id(sapw_organ))
@@ -728,7 +725,7 @@ contains
 
                          fnrt_n = currentCohort%prt%GetState(fnrt_organ, nitrogen_element)
 
-                         if (hlm_use_tree_damage .eq. itrue) then
+                         if (hlm_runtime_params_inst%get_use_tree_damage()) then
 
                             sapw_n = currentCohort%prt%GetState(sapw_organ, nitrogen_element)
 
@@ -1432,7 +1429,7 @@ subroutine LeafLayerPhotosynthesis(f_sun_lsl,         &  ! in
         enddo !sunsha loop
 
         ! Stomatal resistance of the leaf-layer
-        if ( (hlm_use_planthydro.eq.itrue .and. EDPftvarcon_inst%hydr_k_lwp(ft)>nearzero) ) then
+        if ( (hlm_runtime_params_inst%get_use_planthydro() .and. EDPftvarcon_inst%hydr_k_lwp(ft)>nearzero) ) then
            rstoma_out = LeafHumidityStomaResis(leaf_psi, veg_tempk, ceair, can_press, veg_esat, &
                                                rb, gstoma, ft)
         else

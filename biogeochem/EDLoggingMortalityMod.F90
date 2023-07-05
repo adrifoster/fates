@@ -113,7 +113,7 @@ contains
       ! ids.  If there is a match, it is logging time.
       ! -------------------------------------------------------------------------------
      
-      integer, intent(in) :: is_master
+      logical, intent(in) :: is_master
       type(fates_site_type), intent(inout), target :: currentSite     ! site structure
 
       integer :: icode   ! Integer equivalent of the event code (parameter file only allows reals)
@@ -186,7 +186,7 @@ contains
       currentSite%resources_management%delta_biomass_stock = 0.0_r8
       currentSite%resources_management%delta_individual    = 0.0_r8
 
-      if(logging_time .and. (is_master.eq.itrue) ) then
+      if(logging_time .and. is_master) then
          write(fates_log(),fmt) 'Logging Event Enacted on date: ', &
                hlm_current_month,'-',hlm_current_day,'-',hlm_current_year
       end if

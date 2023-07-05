@@ -42,16 +42,9 @@ module EDPatchDynamicsMod
   use FatesConstantsMod    , only : rsnbl_math_prec
   use FatesConstantsMod    , only : fates_tiny
   use FatesConstantsMod    , only : nocomp_bareground
-  use FatesInterfaceTypesMod    , only : hlm_use_planthydro
-  use FatesInterfaceTypesMod    , only : hlm_numSWb
   use FatesInterfaceTypesMod    , only : bc_in_type
   use FatesInterfaceTypesMod    , only : numpft
-  use FatesInterfaceTypesMod    , only : hlm_stepsize
-  use FatesInterfaceTypesMod    , only : hlm_use_sp
-  use FatesInterfaceTypesMod    , only : hlm_use_nocomp
-  use FatesInterfaceTypesMod    , only : hlm_use_fixed_biogeog
-  use FatesInterfaceTypesMod    , only : hlm_num_lu_harvest_cats
-  use FatesHLMRuntimeParamsMod,   only : hlm_runtime_params_inst
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
   use FatesGlobals         , only : endrun => fates_endrun
   use FatesConstantsMod    , only : r8 => fates_r8
   use FatesConstantsMod    , only : itrue, ifalse
@@ -88,7 +81,6 @@ module EDPatchDynamicsMod
   use PRTGenericMod,          only : repro_organ
   use PRTGenericMod,          only : struct_organ
   use PRTLossFluxesMod,       only : PRTBurnLosses
-  use FatesInterfaceTypesMod,      only : hlm_parteh_mode
   use PRTGenericMod,          only : prt_carbon_allom_hyp   
   use PRTGenericMod,          only : prt_cnp_flex_allom_hyp
   use SFParamsMod,            only : SF_VAL_CWD_FRAC
@@ -151,7 +143,7 @@ module EDPatchDynamicsMod
 contains
 
   ! ============================================================================
-  subroutine disturbance_rates( site_in, bc_in)
+  subroutine disturbance_rates(site_in, bc_in, num_harvest_cats)
     !
     ! !DESCRIPTION:
     ! Calculates the fire and mortality related disturbance rates for each patch,
@@ -172,6 +164,7 @@ contains
     ! !ARGUMENTS:
     type(fates_site_type) , intent(inout) :: site_in
     type(bc_in_type) , intent(in) :: bc_in
+    integer,           intent(in) :: num_harvest_cats
     !
     ! !LOCAL VARIABLES:
     type (fates_patch_type) , pointer :: currentPatch
@@ -199,8 +192,9 @@ contains
     real(r8) :: harvest_rate
     real(r8) :: tempsum
     real(r8) :: mean_temp
-    real(r8) :: harvestable_forest_c(hlm_num_lu_harvest_cats)
-    integer  :: harvest_tag(hlm_num_lu_harvest_cats)
+
+    real(r8) :: harvestable_forest_c(num_harvest_cats)
+    integer  :: harvest_tag(num_harvest_cats)
 
     !----------------------------------------------------------------------------------------------
     ! Calculate Mortality Rates (these were previously calculated during growth derivatives)
@@ -348,7 +342,7 @@ contains
        endif
 
        ! For nocomp mode, we need to prevent producing too small patches, which may produce small patches
-       if ((hlm_use_nocomp .eq. itrue) .and. &
+       if ((hlm_runtime_params_inst%get_use_nocomp()) .and. &
            (currentPatch%disturbance_rates(dtype_ilog)*currentPatch%area .lt. min_patch_area_forced)) then
           currentPatch%disturbance_rates(dtype_ilog) = 0._r8
        end if
@@ -452,7 +446,7 @@ contains
     storesmallcohort => null() ! storage of the smallest cohort for insertion routine
     storebigcohort   => null() ! storage of the largest cohort for insertion routine 
 
-    if (hlm_use_nocomp .eq. itrue) then
+    if (hlm_runtime_params_inst%get_use_nocomp()) then
        min_nocomp_pft = 0
        max_nocomp_pft = numpft
     else
@@ -481,7 +475,7 @@ contains
 
           do while(associated(currentPatch))
 
-             cp_nocomp_matches_1_if: if ( hlm_use_nocomp .eq. ifalse .or. &
+             cp_nocomp_matches_1_if: if (.not. hlm_runtime_params_inst%get_use_nocomp() .or. &
                   currentPatch%nocomp_pft_label .eq. i_nocomp_pft ) then
 
                 disturbance_rate = currentPatch%disturbance_rates(i_disturbance_type)
@@ -540,9 +534,9 @@ contains
              ! first create patch to receive primary forest area
              if ( site_areadis_primary .gt. nearzero ) then
                 allocate(new_patch_primary)
-                call new_patch_primary%Create(age, site_areadis_primary,       &
-                  primaryforest, i_nocomp_pft, hlm_numSWb, numpft,             &
-                  currentSite%nlevsoil, hlm_current_tod)
+                call new_patch_primary%Create(age, site_areadis_primary,                 &
+                  primaryforest, i_nocomp_pft, hlm_runtime_params_inst%get_num_swb(),    &
+                  numpft, currentSite%nlevsoil, hlm_current_tod)
 
                 ! Initialize the litter pools to zero, these
                 ! pools will be populated by looping over the existing patches
@@ -564,8 +558,8 @@ contains
              if (site_areadis_secondary .gt. nearzero) then
                allocate(new_patch_secondary)
                call new_patch_secondary%Create(age, site_areadis_secondary,    &
-                  secondaryforest, i_nocomp_pft, hlm_numSWb, numpft,           &
-                  currentSite%nlevsoil, hlm_current_tod)
+                  secondaryforest, i_nocomp_pft, hlm_runtime_params_inst%get_num_swb(),  &
+                  numpft, currentSite%nlevsoil, hlm_current_tod)
 
                 ! Initialize the litter pools to zero, these
                 ! pools will be populated by looping over the existing patches
@@ -591,7 +585,7 @@ contains
              currentPatch => currentSite%oldest_patch
              do while(associated(currentPatch))
 
-                cp_nocomp_matches_2_if: if ( hlm_use_nocomp .eq. ifalse .or. &
+                cp_nocomp_matches_2_if: if (.not. hlm_runtime_params_inst%get_use_nocomp() .or. &
                      currentPatch%nocomp_pft_label .eq. i_nocomp_pft ) then
 
                    ! This is the amount of patch area that is disturbed, and donated by the donor
@@ -676,7 +670,7 @@ contains
                       do while(associated(currentCohort))
 
                          allocate(nc)
-                         if(hlm_use_planthydro.eq.itrue) call InitHydrCohort(CurrentSite,nc)
+                         if (hlm_runtime_params_inst%get_use_planthydro()) call InitHydrCohort(CurrentSite,nc)
 
                          ! Initialize the PARTEH object and point to the
                          ! correct boundary condition fields
@@ -1348,7 +1342,8 @@ contains
        currentPatch => currentPatch%younger
     enddo
 
-    if(hlm_use_fixed_biogeog.eq.itrue .and. hlm_use_nocomp.eq.itrue)then
+    if (hlm_runtime_params_inst%get_use_fixed_biogeog() .and.                            &
+      hlm_runtime_params_inst%get_use_nocomp()) then
       patchno = 1
       currentPatch => currentSite%oldest_patch
       do while(associated(currentPatch))
@@ -1677,7 +1672,7 @@ contains
 
     ! If plant hydraulics are turned on, account for water leaving the plant-soil
     ! mass balance through the dead trees
-    if (hlm_use_planthydro == itrue) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
        currentCohort => currentPatch%shortest
        do while(associated(currentCohort))
           num_dead_trees  = (currentCohort%fire_mort * &
@@ -1983,7 +1978,7 @@ contains
           ! Update water balance by removing dead plant water
           ! but only do this once (use the carbon element id)
           if( (element_id == carbon12_element) .and. &
-              (hlm_use_planthydro == itrue) ) then
+              (hlm_runtime_params_inst%get_use_planthydro()) ) then
               call AccumulateMortalityWaterStorage(currentSite,currentCohort, num_dead)
           end if
           
@@ -2128,7 +2123,7 @@ contains
     ! primary patches in non-nocomp mode.  So if this is the case, bump up the maximum number of primary patches
     ! to let there be one for each type of nocomp PFT on the site.  this is likely to lead to problems
     ! if anthropogenic disturance is enabled.
-    if (hlm_use_nocomp.eq.itrue) then
+    if (hlm_runtime_params_inst%get_use_nocomp()) then
        maxpatches(primaryforest) = max(maxpatch_primary, sum(csite%use_this_pft))
        maxpatches(secondaryforest) = maxpatch_total - maxpatches(primaryforest)
        if (maxpatch_total .lt. maxpatches(primaryforest)) then
@@ -2155,7 +2150,7 @@ contains
     enddo
 
     pftlabelmin = 0
-    if ( hlm_use_nocomp .eq. itrue ) then
+    if (hlm_runtime_params_inst%get_use_nocomp()) then
        pftlabelmax = numpft
     else
        pftlabelmax = 0
@@ -2210,7 +2205,7 @@ contains
                    anthro_dist_labels_match_if: if ( tpp%anthro_disturbance_label .eq. i_disttype .and. &
                         currentPatch%anthro_disturbance_label .eq. i_disttype) then
 
-                    nocomp_pft_labels_match_if: if (hlm_use_nocomp .eq. ifalse .or. &
+                    nocomp_pft_labels_match_if: if (.not. hlm_runtime_params_inst%get_use_nocomp() .or. &
                          (tpp%nocomp_pft_label .eq. i_pftlabel .and. &
                          currentPatch%nocomp_pft_label .eq. i_pftlabel)) then
 
@@ -2443,7 +2438,7 @@ contains
        call endrun(msg=errMsg(sourcefile, __LINE__))
     endif
 
-    if ( hlm_use_nocomp .eq. itrue .and. rp%nocomp_pft_label .ne. dp%nocomp_pft_label) then
+    if (hlm_runtime_params_inst%get_use_nocomp() .and. rp%nocomp_pft_label .ne. dp%nocomp_pft_label) then
        write(fates_log(),*) 'trying to fuse patches with different nocomp_pft_label values'
        write(fates_log(),*) 'rp%nocomp_pft_label, dp%nocomp_pft_label',rp%nocomp_pft_label, dp%nocomp_pft_label
        write(fates_log(),*) 'rp%area, dp%area',rp%area, dp%area
@@ -2607,7 +2602,7 @@ contains
     do while(associated(currentPatch)) 
        lessthan_min_patcharea_if: if(currentPatch%area <= min_patch_area)then
           
-          nocomp_if: if (hlm_use_nocomp .eq. itrue) then
+          nocomp_if: if (hlm_runtime_params_inst%get_use_nocomp()) then
 
              gotfused = .false.
              patchpointer => currentSite%youngest_patch

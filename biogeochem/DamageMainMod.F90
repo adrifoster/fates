@@ -58,7 +58,7 @@ contains
     !-----------------------------------------------------------------------------
 
 
-    integer, intent(in) :: is_master
+    logical, intent(in) :: is_master
     integer :: icode     ! Integer equivalent of the event code (parameter file only allows reals)
     integer :: damage_date  ! Day of month for damage extracted from event code
     integer :: damage_month ! Month of year for damage extracted from event code
@@ -122,7 +122,7 @@ contains
        call endrun(msg=errMsg(sourcefile, __LINE__))
     end if
 
-    if(damage_time .and. (is_master.eq.itrue) ) then
+    if(damage_time .and. is_master) then
        write(fates_log(),fmt) 'Damage Event Enacted on date: ', &
             hlm_current_month,'-', hlm_current_day,'-',hlm_current_year
     end if

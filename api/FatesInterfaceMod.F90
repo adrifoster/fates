@@ -84,6 +84,7 @@ module FatesInterfaceMod
   use FatesHydraulicsMemMod,     only : nshell
   use FatesHydraulicsMemMod,     only : nlevsoi_hyd_max
   use CLMFatesParamInterfaceMod, only : FatesReadParameters
+  use FatesHLMRuntimeParamsMod,  only : hlm_runtime_params_inst
    
   use shr_log_mod,               only : errMsg => shr_log_errMsg
   use shr_infnan_mod,            only : nan => shr_infnan_nan, assignment(=)
@@ -253,7 +254,7 @@ contains
        fates%bc_in(s)%salinity_sl(:)   = 0.0_r8
     endif
     
-    if (hlm_use_planthydro.eq.itrue) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
        
        fates%bc_in(s)%qflx_transp_pa(:) = 0.0_r8
        fates%bc_in(s)%swrad_net_pa(:) = 0.0_r8
@@ -279,7 +280,7 @@ contains
 
     
     ! Fates -> BGC fragmentation mass fluxes
-    select case(hlm_parteh_mode) 
+    select case(hlm_runtime_params_inst%get_parteh_mode()) 
     case(prt_carbon_allom_hyp)
        fates%bc_out(s)%litt_flux_cel_c_si(:) = 0._r8
        fates%bc_out(s)%litt_flux_lig_c_si(:) = 0._r8
@@ -304,7 +305,7 @@ contains
     case default
        write(fates_log(), *) 'An unknown parteh hypothesis was passed'
        write(fates_log(), *) 'while zeroing output boundary conditions'
-       write(fates_log(), *) 'hlm_parteh_mode: ',hlm_parteh_mode
+       write(fates_log(), *) 'hlm_parteh_mode: ', hlm_runtime_params_inst%get_parteh_mode()
        call endrun(msg=errMsg(sourcefile, __LINE__))
     end select
     
@@ -333,7 +334,7 @@ contains
     fates%bc_out(s)%canopy_fraction_pa(:) = 0.0_r8
     fates%bc_out(s)%frac_veg_nosno_alb_pa(:) = 0.0_r8
     
-    if (hlm_use_planthydro.eq.itrue) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
        fates%bc_out(s)%qflx_soil2root_sisl(:) = 0.0_r8
        fates%bc_out(s)%qflx_ro_sisl(:)        = 0.0_r8
     end if
@@ -377,7 +378,7 @@ contains
 
       bc_in%nlevdecomp = nlevdecomp_in
 
-      if (hlm_use_vertsoilc == itrue) then
+      if (hlm_runtime_params_inst%get_use_vertsoilc()) then
          if(bc_in%nlevdecomp .ne. bc_in%nlevsoil) then
             write(fates_log(), *) 'The host has signaled a vertically resolved'
             write(fates_log(), *) 'soil decomposition model. Therefore, the '
@@ -404,7 +405,7 @@ contains
       ! uptake for each cohort, and don't need to allocate by layer
       ! Allocating differently could save a lot of memory and time
 
-      if (hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+      if (hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp) then
          allocate(bc_in%plant_nh4_uptake_flux(max_comp_per_site,1))
          allocate(bc_in%plant_no3_uptake_flux(max_comp_per_site,1))
          allocate(bc_in%plant_p_uptake_flux(max_comp_per_site,1))
@@ -432,8 +433,8 @@ contains
       allocate(bc_in%precip24_pa(maxpatch_total))
       
       ! Radiation
-      allocate(bc_in%solad_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_in%solai_parb(maxpatch_total,hlm_numSWb))
+      allocate(bc_in%solad_parb(maxpatch_total, hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_in%solai_parb(maxpatch_total, hlm_runtime_params_inst%get_num_swb()))
       
       ! Hydrology
       allocate(bc_in%smp_sl(nlevsoil_in))
@@ -465,11 +466,11 @@ contains
       allocate(bc_in%filter_vegzen_pa(maxpatch_total))
       allocate(bc_in%coszen_pa(maxpatch_total))
       allocate(bc_in%fcansno_pa(maxpatch_total))
-      allocate(bc_in%albgr_dir_rb(hlm_numSWb))
-      allocate(bc_in%albgr_dif_rb(hlm_numSWb))
+      allocate(bc_in%albgr_dir_rb(hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_in%albgr_dif_rb(hlm_runtime_params_inst%get_num_swb()))
 
       ! Plant-Hydro BC's
-      if (hlm_use_planthydro.eq.itrue) then
+      if (hlm_runtime_params_inst%get_use_planthydro()) then
 
          allocate(bc_in%qflx_transp_pa(maxpatch_total))
          allocate(bc_in%swrad_net_pa(maxpatch_total))
@@ -487,7 +488,7 @@ contains
 
       ! harvest flag denote data from hlm,
       ! while the logging flag signifies only that logging is occurring (which could just be FATES logging)
-      if (hlm_use_lu_harvest .gt. 0) then
+      if (hlm_runtime_params_inst%get_use_lu_harvest()) then
          allocate(bc_in%hlm_harvest_rates(num_lu_harvest_cats))
          allocate(bc_in%hlm_harvest_catnames(num_lu_harvest_cats))
       else ! LoggingMortality_frac needs these passed to it regardless of harvest
@@ -498,7 +499,7 @@ contains
       allocate(bc_in%pft_areafrac(natpft_lb:natpft_ub))
 
       ! Variables for SP mode. 
-      if(hlm_use_sp.eq.itrue) then
+      if (hlm_runtime_params_inst%get_use_sp()) then
         allocate(bc_in%hlm_sp_tlai(natpft_lb:natpft_ub))
         allocate(bc_in%hlm_sp_tsai(natpft_lb:natpft_ub))     
         allocate(bc_in%hlm_sp_htop(natpft_lb:natpft_ub))
@@ -535,13 +536,13 @@ contains
       allocate(bc_out%rssha_pa(maxpatch_total))
       
       ! Canopy Radiation
-      allocate(bc_out%albd_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_out%albi_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_out%fabd_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_out%fabi_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_out%ftdd_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_out%ftid_parb(maxpatch_total,hlm_numSWb))
-      allocate(bc_out%ftii_parb(maxpatch_total,hlm_numSWb))
+      allocate(bc_out%albd_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_out%albi_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_out%fabd_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_out%fabi_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_out%ftdd_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_out%ftid_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
+      allocate(bc_out%ftii_parb(maxpatch_total,hlm_runtime_params_inst%get_num_swb()))
 
 
       ! We allocate the boundary conditions to the BGC
@@ -554,7 +555,7 @@ contains
       ! When FATES does not have nutrients enabled, these
       ! arrays are indexed by 1.
       
-      !if(trim(hlm_nu_com).eq.'RD') then
+      !if(trim(hlm_runtime_params_inst%get_decomp_scheme()).eq.'RD') then
       !   allocate(bc_out%n_demand(max_comp_per_site))
       !   allocate(bc_out%p_demand(max_comp_per_site))
       !end if
@@ -563,7 +564,7 @@ contains
       allocate(bc_out%veg_rootc(max_comp_per_site,nlevdecomp_in))
       allocate(bc_out%ft_index(max_comp_per_site))
          
-      if(trim(hlm_nu_com).eq.'ECA') then
+      if (trim(hlm_runtime_params_inst%get_decomp_scheme()).eq.'ECA') then
          allocate(bc_out%decompmicc(nlevdecomp_in))
          allocate(bc_out%cn_scalar(max_comp_per_site))
          allocate(bc_out%cp_scalar(max_comp_per_site))
@@ -571,7 +572,7 @@ contains
 
       ! Include the bare-ground patch for these patch-level boundary conditions
       ! (it will always be zero for all of these)
-      if(hlm_use_ch4.eq.itrue) then
+      if (hlm_runtime_params_inst%get_use_ch4()) then
          allocate(bc_out%annavg_agnpp_pa(0:maxpatch_total));bc_out%annavg_agnpp_pa(:)=nan
          allocate(bc_out%annavg_bgnpp_pa(0:maxpatch_total));bc_out%annavg_bgnpp_pa(:)=nan
          allocate(bc_out%annsum_npp_pa(0:maxpatch_total));bc_out%annsum_npp_pa(:)=nan
@@ -589,7 +590,7 @@ contains
       
       
       ! Fates -> BGC fragmentation mass fluxes
-      select case(hlm_parteh_mode) 
+      select case(hlm_runtime_params_inst%get_parteh_mode()) 
       case(prt_carbon_allom_hyp)
          allocate(bc_out%litt_flux_cel_c_si(nlevdecomp_in))
          allocate(bc_out%litt_flux_lig_c_si(nlevdecomp_in))
@@ -613,7 +614,7 @@ contains
       case default
          write(fates_log(), *) 'An unknown parteh hypothesis was passed'
          write(fates_log(), *) 'to the site level output boundary conditions'
-         write(fates_log(), *) 'hlm_parteh_mode: ',hlm_parteh_mode
+         write(fates_log(), *) 'hlm_parteh_mode: ', hlm_runtime_params_inst%get_parteh_mode()
          call endrun(msg=errMsg(sourcefile, __LINE__))
       end select
 
@@ -636,7 +637,7 @@ contains
       allocate(bc_out%nocomp_pft_label_pa(maxpatch_total))
 
       ! Plant-Hydro BC's
-      if (hlm_use_planthydro.eq.itrue) then
+      if (hlm_runtime_params_inst%get_use_planthydro()) then
          allocate(bc_out%qflx_soil2root_sisl(nlevsoil_in))
          allocate(bc_out%qflx_ro_sisl(nlevsoil_in))
       end if
@@ -700,7 +701,7 @@ contains
 
          fates_numpft = size(prt_params%wood_density,dim=1)
          
-         if(hlm_use_sp==itrue)then
+         if (hlm_runtime_params_inst%get_use_sp()) then
 
             ! For an SP run we also just use the primary patches
             ! to hold all PFTs.  So create the same number of
@@ -725,7 +726,7 @@ contains
             ! can also apply those constraints to maxpatch_primary and secondary
             ! and that value will match fates_maxPatchesPerSite
             
-            if(hlm_use_nocomp==itrue) then
+            if (hlm_runtime_params_inst%get_use_nocomp()) then
 
                maxpatch_primary = max(maxpatch_primary,fates_numpft)
                maxpatch_total = maxpatch_primary + maxpatch_secondary
@@ -790,16 +791,18 @@ contains
          
          ! These values are used to define the restart file allocations and general structure
          ! of memory for the cohort arrays
-         if(hlm_use_sp.eq.itrue) then
+         if (hlm_runtime_params_inst%get_use_sp()) then
             fates_maxElementsPerPatch = maxSWb
          else
-            fates_maxElementsPerPatch = max(maxSWb,max_cohort_per_patch, ndcmpy*hlm_maxlevsoil ,ncwd*hlm_maxlevsoil)
+            fates_maxElementsPerPatch = max(maxSWb,max_cohort_per_patch,                 &
+              ndcmpy*hlm_runtime_params_inst%get_maxlevsoil(),                           &
+              ncwd*hlm_runtime_params_inst%get_maxlevsoil())
          end if
          
          fates_maxElementsPerSite = max(fates_maxPatchesPerSite * fates_maxElementsPerPatch, &
               numWatermem, num_vegtemp_mem, num_elements, nlevsclass*numpft)
 
-         if(hlm_use_planthydro==itrue)then
+         if (hlm_runtime_params_inst%get_use_planthydro()) then
             fates_maxElementsPerSite = max(fates_maxElementsPerSite, nshell*nlevsoi_hyd_max )
          end if
          
@@ -822,7 +825,7 @@ contains
             p_uptake_mode = coupled_p_uptake
          end if
          
-         if (hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp ) then
+         if (hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp ) then
 
             if((p_uptake_mode==coupled_p_uptake) .or. (n_uptake_mode==coupled_n_uptake))then
                max_comp_per_site = fates_maxElementsPerSite
@@ -939,15 +942,17 @@ contains
       ! be global constants.
 
       allocate(ema_24hr)
-      call ema_24hr%define(sec_per_day, hlm_stepsize, moving_ema_window)
+      call ema_24hr%define(sec_per_day, hlm_runtime_params_inst%get_stepsize(),          &
+        moving_ema_window)
       allocate(fixed_24hr)
-      call fixed_24hr%define(sec_per_day, hlm_stepsize, fixed_window)
+      call fixed_24hr%define(sec_per_day, hlm_runtime_params_inst%get_stepsize(),        &
+        fixed_window)
       allocate(ema_lpa)  ! note that this parameter has units of days
-      call ema_lpa%define(photo_temp_acclim_timescale*sec_per_day, &
-           hlm_stepsize,moving_ema_window)
+      call ema_lpa%define(photo_temp_acclim_timescale*sec_per_day,                       &
+        hlm_runtime_params_inst%get_stepsize(), moving_ema_window)
       allocate(ema_longterm)  ! note that this parameter has units of years
       call ema_longterm%define(photo_temp_acclim_thome_time*days_per_year*sec_per_day, & 
-           hlm_stepsize,moving_ema_window)
+        hlm_runtime_params_inst%get_stepsize(), moving_ema_window)
       
       !allocate(ema_60day)
       !call ema_60day%define(prt_params%fnrt_adapt_tscl*sec_per_day,sec_per_day,moving_ema_window)
@@ -970,7 +975,7 @@ contains
      ! to loop through elements, and call the correct PARTEH interfaces
      ! automatically.
      
-     select case(hlm_parteh_mode)
+     select case(hlm_runtime_params_inst%get_parteh_mode())
      case(prt_carbon_allom_hyp)
 
         num_elements = 1
@@ -1011,8 +1016,6 @@ contains
     subroutine fates_history_maps
        
        use FatesLitterMod, only : NFSC
-       use EDParamsMod, only : nclmax
-       use EDParamsMod, only : nlevleaf
        use EDParamsMod, only : ED_val_history_sizeclass_bin_edges
        use EDParamsMod, only : ED_val_history_ageclass_bin_edges
        use EDParamsMod, only : ED_val_history_height_bin_edges

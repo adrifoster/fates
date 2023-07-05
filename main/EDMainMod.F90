@@ -4,111 +4,95 @@ module EDMainMod
   ! Main ED module.
   ! ============================================================================
 
-  use shr_kind_mod             , only : r8 => shr_kind_r8
-
-  use FatesGlobals             , only : fates_log
-
-  use FatesInterfaceTypesMod        , only : hlm_freq_day
-  use FatesInterfaceTypesMod        , only : hlm_day_of_year
-  use FatesInterfaceTypesMod        , only : hlm_days_per_year
-  use FatesInterfaceTypesMod        , only : hlm_current_year
-  use FatesInterfaceTypesMod        , only : hlm_current_month
-  use FatesInterfaceTypesMod        , only : hlm_current_day
-  use FatesInterfaceTypesMod        , only : hlm_use_planthydro
-  use FatesInterfaceTypesMod        , only : hlm_parteh_mode
-  use FatesInterfaceTypesMod        , only : hlm_use_cohort_age_tracking
-  use FatesInterfaceTypesMod        , only : hlm_reference_date
-  use FatesInterfaceTypesMod        , only : hlm_use_ed_prescribed_phys
-  use FatesInterfaceTypesMod        , only : hlm_use_tree_damage
-  use FatesInterfaceTypesMod        , only : hlm_use_ed_st3
-  use FatesInterfaceTypesMod        , only : hlm_use_sp
-  use FatesInterfaceTypesMod        , only : bc_in_type
-  use FatesInterfaceTypesMod        , only : bc_out_type
-  use FatesInterfaceTypesMod        , only : hlm_masterproc
-  use FatesInterfaceTypesMod        , only : numpft
-  use FatesInterfaceTypesMod        , only : hlm_use_nocomp
-  use FatesHLMRuntimeParamsMod,       only : hlm_runtime_params_inst
-  use PRTGenericMod            , only : prt_carbon_allom_hyp
-  use PRTGenericMod            , only : prt_cnp_flex_allom_hyp
-  use PRTGenericMod            , only : nitrogen_element
-  use PRTGenericMod            , only : phosphorus_element
-  use EDCohortDynamicsMod      , only : terminate_cohorts
-  use EDCohortDynamicsMod      , only : fuse_cohorts
-  use EDCohortDynamicsMod      , only : sort_cohorts
-  use EDCohortDynamicsMod      , only : count_cohorts
-  use EDCohortDynamicsMod      , only : EvaluateAndCorrectDBH
-  use EDCohortDynamicsMod      , only : DamageRecovery
-  use EDPatchDynamicsMod       , only : disturbance_rates
-  use EDPatchDynamicsMod       , only : fuse_patches
-  use EDPatchDynamicsMod       , only : spawn_patches
-  use EDPatchDynamicsMod       , only : terminate_patches
-  use EDPhysiologyMod          , only : phenology
-  use EDPhysiologyMod          , only : satellite_phenology
-  use EDPhysiologyMod          , only : recruitment
-  use EDPhysiologyMod          , only : trim_canopy
-  use EDPhysiologyMod          , only : SeedIn
-  use EDPhysiologyMod          , only : ZeroAllocationRates
-  use EDPhysiologyMod          , only : ZeroLitterFluxes
-  use EDPhysiologyMod          , only : PreDisturbanceLitterFluxes
-  use EDPhysiologyMod          , only : PreDisturbanceIntegrateLitter
-  use EDPhysiologyMod          , only : UpdateRecruitL2FR
-  use EDPhysiologyMod          , only : UpdateRecruitStoich
-  use EDPhysiologyMod          , only : SetRecruitL2FR
-  use EDPhysiologyMod          , only : GenerateDamageAndLitterFluxes
-  use FatesSoilBGCFluxMod      , only : FluxIntoLitterPools
-  use FatesSoilBGCFluxMod      , only : EffluxIntoLitterPools
-  use FatesSoilBGCFluxMod      , only : PrepNutrientAquisitionBCs
-  use FatesSoilBGCFluxMod      , only : PrepCH4BCs
-  use SFMainMod                , only : fire_model
+  use FatesConstantsMod,          only : phen_dstat_moiston
+  use FatesConstantsMod,          only : phen_dstat_timeon
+  use FatesConstantsMod,          only : itrue, ifalse
+  use FatesConstantsMod,          only : secondaryforest
+  use FatesConstantsMod,          only : nearzero
+  use FatesConstantsMod,          only : sec_per_day
+  use FatesConstantsMod,          only : AREA_INV
+  use FatesConstantsMod,          only : AREA
+  use FatesGlobals,               only : fates_log
+  use FatesGlobals,               only : endrun => fates_endrun
+  use FatesHLMRuntimeParamsMod,   only : hlm_runtime_params_inst
+  use EDPftvarcon,                only : EDPftvarcon_inst
+  use FatesInterfaceTypesMod,     only : hlm_freq_day
+  use FatesInterfaceTypesMod,     only : hlm_day_of_year
+  use FatesInterfaceTypesMod,     only : hlm_days_per_year
+  use FatesInterfaceTypesMod,     only : hlm_current_year
+  use FatesInterfaceTypesMod,     only : hlm_current_month
+  use FatesInterfaceTypesMod,     only : hlm_current_day
+  use FatesInterfaceTypesMod,     only : hlm_reference_date
+  use FatesInterfaceTypesMod,     only : bc_in_type
+  use FatesInterfaceTypesMod,     only : bc_out_type
+  use FatesInterfaceTypesMod,     only : numpft
+  use PRTGenericMod,              only : prt_cnp_flex_allom_hyp
+  use PRTGenericMod,              only : nitrogen_element
+  use PRTGenericMod,              only : phosphorus_element
+  use PRTGenericMod,              only : num_elements
+  use PRTGenericMod,              only : element_list
+  use PRTGenericMod,              only : element_pos
+  use PRTGenericMod,              only : carbon12_element
+  use PRTGenericMod,              only : leaf_organ
+  use PRTGenericMod,              only : fnrt_organ
+  use PRTGenericMod,              only : sapw_organ
+  use PRTGenericMod,              only : store_organ
+  use PRTGenericMod,              only : repro_organ
+  use PRTGenericMod,              only : struct_organ
+  use FatesLitterMod,             only : litter_type
+  use PRTLossFluxesMod,           only : PRTMaintTurnover
+  use EDPhysiologyMod,            only : phenology
+  use EDPhysiologyMod,            only : satellite_phenology
+  use EDPhysiologyMod,            only : recruitment
+  use EDPhysiologyMod,            only : trim_canopy
+  use EDPhysiologyMod,            only : SeedIn
+  use EDPhysiologyMod,            only : ZeroAllocationRates
+  use EDPhysiologyMod,            only : ZeroLitterFluxes
+  use EDPhysiologyMod,            only : PreDisturbanceLitterFluxes
+  use EDPhysiologyMod,            only : PreDisturbanceIntegrateLitter
+  use EDPhysiologyMod,            only : UpdateRecruitL2FR
+  use EDPhysiologyMod,            only : UpdateRecruitStoich
+  use EDPhysiologyMod,            only : SetRecruitL2FR
+  use EDPhysiologyMod,            only : GenerateDamageAndLitterFluxes
+  use EDCanopyStructureMod,       only : canopy_structure, canopy_spread
+  use FatesPlantHydraulicsMod,    only : do_growthrecruiteffects
+  use FatesPlantHydraulicsMod,    only : UpdateSizeDepPlantHydProps
+  use FatesPlantHydraulicsMod,    only : UpdateSizeDepPlantHydStates
+  use FatesPlantHydraulicsMod,    only : UpdateSizeDepRhizHydProps
+  use FatesPlantHydraulicsMod,    only : AccumulateMortalityWaterStorage
+  use FatesSoilBGCFluxMod,        only : FluxIntoLitterPools
+  use FatesSoilBGCFluxMod,        only : EffluxIntoLitterPools
+  use FatesSoilBGCFluxMod,        only : PrepNutrientAquisitionBCs
+  use FatesSoilBGCFluxMod,        only : PrepCH4BCs
+  use FatesAllometryMod,          only : h_allom
+  use EDCohortDynamicsMod,        only : terminate_cohorts
+  use EDCohortDynamicsMod,        only : fuse_cohorts
+  use EDCohortDynamicsMod,        only : sort_cohorts
+  use EDCohortDynamicsMod,        only : count_cohorts
+  use EDCohortDynamicsMod,        only : EvaluateAndCorrectDBH
+  use EDCohortDynamicsMod,        only : DamageRecovery
+  use EDPatchDynamicsMod,         only : disturbance_rates
+  use EDPatchDynamicsMod,         only : fuse_patches
+  use EDPatchDynamicsMod,         only : spawn_patches
+  use EDPatchDynamicsMod,         only : terminate_patches
+  use EDPatchDynamicsMod,         only : get_frac_site_primary
+  use SFMainMod,                  only : fire_model
   use FatesSizeAgeTypeIndicesMod, only : get_age_class_index
   use FatesSizeAgeTypeIndicesMod, only : coagetype_class_index
-  use FatesLitterMod           , only : litter_type
-  use FatesLitterMod           , only : ncwd
-  use FatesSiteMod             , only : fates_site_type
-  use FatesPatchMod            , only : fates_patch_type
-  use FatesCohortMod           , only : fates_cohort_type
-  use FatesConstantsMod        , only : AREA
-  use FatesMassBalTypeMod,       only : site_massbal_type
-  use PRTGenericMod            , only : num_elements
-  use PRTGenericMod            , only : element_list
-  use PRTGenericMod            , only : element_pos
-  use FatesConstantsMod        , only : phen_dstat_moiston
-  use FatesConstantsMod        , only : phen_dstat_timeon
-  use FatesConstantsMod        , only : itrue,ifalse
-  use FatesConstantsMod        , only : primaryforest, secondaryforest
-  use FatesConstantsMod        , only : nearzero
-  use FatesConstantsMod        , only : m2_per_ha
-  use FatesConstantsMod        , only : sec_per_day
-  use FatesPlantHydraulicsMod  , only : do_growthrecruiteffects
-  use FatesPlantHydraulicsMod  , only : UpdateSizeDepPlantHydProps
-  use FatesPlantHydraulicsMod  , only : UpdateSizeDepPlantHydStates
-  use FatesPlantHydraulicsMod  , only : InitPlantHydStates
-  use FatesPlantHydraulicsMod  , only : UpdateSizeDepRhizHydProps
-  use FatesPlantHydraulicsMod  , only : AccumulateMortalityWaterStorage
-  use FatesAllometryMod        , only : h_allom,tree_sai,tree_lai
-  use EDLoggingMortalityMod    , only : IsItLoggingTime
-  use EDLoggingMortalityMod    , only : get_harvestable_carbon
-  use DamageMainMod            , only : IsItDamageTime
-  use EDPatchDynamicsMod       , only : get_frac_site_primary
-  use FatesGlobals             , only : endrun => fates_endrun
-  use ChecksBalancesMod        , only : SiteMassStock
-  use EDMortalityFunctionsMod  , only : Mortality_Derivative
-  use FatesConstantsMod               , only : AREA_INV
-  use PRTGenericMod,          only : carbon12_element
-  use PRTGenericMod,          only : leaf_organ
-  use PRTGenericMod,          only : fnrt_organ
-  use PRTGenericMod,          only : sapw_organ
-  use PRTGenericMod,          only : store_organ
-  use PRTGenericMod,          only : repro_organ
-  use PRTGenericMod,          only : struct_organ
-  use PRTLossFluxesMod,       only : PRTMaintTurnover
-  use PRTLossFluxesMod,       only : PRTReproRelease
-  use EDPftvarcon,            only : EDPftvarcon_inst
-  use FatesHistoryInterfaceMod, only : fates_hist
+  use FatesSiteMod,               only : fates_site_type
+  use FatesPatchMod,              only : fates_patch_type
+  use FatesCohortMod,             only : fates_cohort_type
+  use FatesMassBalTypeMod,        only : site_massbal_type
+  use EDLoggingMortalityMod,      only : IsItLoggingTime
+  use EDLoggingMortalityMod,      only : get_harvestable_carbon
+  use DamageMainMod,              only : IsItDamageTime
+  use ChecksBalancesMod,          only : SiteMassStock
+  use EDMortalityFunctionsMod,    only : Mortality_Derivative
+  use FatesHistoryInterfaceMod,   only : fates_hist
 
-  ! CIME Globals
-  use shr_log_mod         , only : errMsg => shr_log_errMsg
-  use shr_infnan_mod      , only : nan => shr_infnan_nan, assignment(=)
+  use shr_kind_mod,              only : r8 => shr_kind_r8
+  use shr_log_mod,               only : errMsg => shr_log_errMsg
+  use shr_infnan_mod,            only : nan => shr_infnan_nan, assignment(=)
 
   implicit none
   private
@@ -156,7 +140,7 @@ contains
 
     !-----------------------------------------------------------------------
 
-    if (debug .and.( hlm_masterproc==itrue)) write(fates_log(),'(A,I4,A,I2.2,A,I2.2)') 'FATES Dynamics: ',&
+    if (debug .and. hlm_runtime_params_inst%get_masterproc()) write(fates_log(),'(A,I4,A,I2.2,A,I2.2)') 'FATES Dynamics: ',&
           hlm_current_year,'-',hlm_current_month,'-',hlm_current_day
 
     ! Consider moving this towards the end, because some of these
@@ -175,10 +159,10 @@ contains
 
     ! Call a routine that simply identifies if logging should occur
     ! This is limited to a global event until more structured event handling is enabled
-    call IsItLoggingTime(hlm_masterproc,currentSite)
+    call IsItLoggingTime(hlm_runtime_params_inst%get_masterproc(), currentSite)
 
     ! Call a routine that identifies if damage should occur
-    call IsItDamageTime(hlm_masterproc)
+    call IsItDamageTime(hlm_runtime_params_inst%get_masterproc())
  
     !**************************************************************************
     ! Fire, growth, biogeochemistry.
@@ -199,8 +183,8 @@ contains
     ! We do not allow phenology while in ST3 mode either, it is hypothetically
     ! possible to allow this, but we have not plugged in the litter fluxes
     ! of flushing or turning over leaves for non-dynamics runs
-    if (hlm_use_ed_st3.eq.ifalse)then
-      if(hlm_use_sp.eq.ifalse) then
+    if (.not. hlm_runtime_params_inst%get_use_ed_st3()) then
+      if (.not. hlm_runtime_params_inst%get_use_sp()) then
         call phenology(currentSite, bc_in )
       else
         call satellite_phenology(currentSite, bc_in )
@@ -208,7 +192,8 @@ contains
     end if
 
 
-    if (hlm_use_ed_st3.eq.ifalse.and.hlm_use_sp.eq.ifalse) then   ! Bypass if ST3
+    if (.not. hlm_runtime_params_inst%get_use_ed_st3() .and.                             &
+      .not. hlm_runtime_params_inst%get_use_sp()) then   ! Bypass if ST3
        
        ! Check that the site doesn't consist solely of a single bareground patch.
        ! If so, skip the fire model.  Since the bareground patch should be the
@@ -221,10 +206,12 @@ contains
 
        ! Calculate disturbance and mortality based on previous timestep vegetation.
        ! disturbance_rates calls logging mortality and other mortalities, Yi Xu
-       call disturbance_rates(currentSite, bc_in)
+       call disturbance_rates(currentSite, bc_in,                                        &
+        hlm_runtime_params_inst%get_num_lu_harvest_cats())
 
        ! Integrate state variables from annual rates to daily timestep
-       call ed_integrate_state_variables(currentSite, bc_in, bc_out )
+       call ed_integrate_state_variables(currentSite, bc_in, bc_out,                     &
+        hlm_runtime_params_inst%get_num_lu_harvest_cats())
 
     else
        ! ed_intergrate_state_variables is where the new cohort flag
@@ -241,7 +228,8 @@ contains
     ! Reproduction, Recruitment and Cohort Dynamics : controls cohort organization
     !******************************************************************************
 
-    if(hlm_use_ed_st3.eq.ifalse.and.hlm_use_sp.eq.ifalse) then
+    if (.not.  hlm_runtime_params_inst%get_use_ed_st3() .and.                            &
+      .not. hlm_runtime_params_inst%get_use_sp()) then
        currentPatch => currentSite%oldest_patch
        do while (associated(currentPatch))
 
@@ -281,8 +269,7 @@ contains
 
     ! turn off patch dynamics if SP or ST3 modes in use
     do_patch_dynamics = itrue
-    if(hlm_use_ed_st3.eq.itrue .or. &
-       hlm_use_sp.eq.itrue)then
+    if (hlm_runtime_params_inst%get_use_ed_st3() .or. hlm_runtime_params_inst%get_use_sp()) then
        do_patch_dynamics = ifalse
     end if
 
@@ -299,7 +286,7 @@ contains
        ! based on the new cohort-patch structure
        ! 'rhizosphere geometry' (column-level root biomass + rootfr --> root length
        ! density --> node radii and volumes)
-       if( (hlm_use_planthydro.eq.itrue) .and. do_growthrecruiteffects) then
+       if (hlm_runtime_params_inst%get_use_planthydro() .and. do_growthrecruiteffects) then
           call UpdateSizeDepRhizHydProps(currentSite, bc_in)
           !! call UpdateSizeDepRhizHydStates(currentSite, bc_in) ! keeping if re-implemented (RGK 12-2021)
        end if
@@ -316,31 +303,18 @@ contains
   end subroutine ed_ecosystem_dynamics
 
   !-------------------------------------------------------------------------------!
-  subroutine ed_integrate_state_variables(currentSite, bc_in, bc_out )
+  subroutine ed_integrate_state_variables(currentSite, bc_in, bc_out, num_harvest_cats)
     !
 
     ! !DESCRIPTION:
     ! FIX(SPM,032414) refactor so everything goes through interface
-    !
-    ! !USES:
-    use FatesInterfaceTypesMod, only : hlm_num_lu_harvest_cats
-    use PRTGenericMod        , only : leaf_organ
-    use PRTGenericMod        , only : repro_organ
-    use PRTGenericMod        , only : sapw_organ
-    use PRTGenericMod        , only : struct_organ
-    use PRTGenericMod        , only : store_organ
-    use PRTGenericMod        , only : fnrt_organ
-    use FatesInterfaceTypesMod, only : hlm_use_cohort_age_tracking
-    use FatesConstantsMod, only : itrue
-    use FatesConstantsMod     , only : nearzero
-    use EDCanopyStructureMod  , only : canopy_structure
-    
+
     ! !ARGUMENTS:
 
-    type(fates_site_type)     , intent(inout) :: currentSite
-    type(bc_in_type)        , intent(in)   :: bc_in
-    type(bc_out_type)       , intent(inout)  :: bc_out
-
+    type(fates_site_type), intent(inout) :: currentSite
+    type(bc_in_type),      intent(in)    :: bc_in
+    type(bc_out_type),     intent(inout) :: bc_out
+    integer,               intent(in)    :: num_harvest_cats
     !
     ! !LOCAL VARIABLES:
     type(site_massbal_type), pointer :: site_cmass
@@ -373,8 +347,8 @@ contains
     real(r8) :: target_leaf_c
     real(r8) :: frac_site_primary
 
-    real(r8) :: harvestable_forest_c(hlm_num_lu_harvest_cats)
-    integer  :: harvest_tag(hlm_num_lu_harvest_cats)
+    real(r8) :: harvestable_forest_c(num_harvest_cats)
+    integer  :: harvest_tag(num_harvest_cats)
 
     real(r8) :: n_old
     real(r8) :: n_recover
@@ -487,7 +461,7 @@ contains
              ! -----------------------------------------------------------------------------
 
 
-             if (hlm_use_ed_prescribed_phys .eq. itrue) then
+             if (hlm_runtime_params_inst%get_use_ed_prescribed_phys()) then
                 if (currentCohort%canopy_layer .eq. 1) then
                    currentCohort%npp_acc = EDPftvarcon_inst%prescribed_npp_canopy(ft) &
                         * currentCohort%c_area / currentCohort%n / hlm_days_per_year
@@ -584,7 +558,7 @@ contains
 
           call currentCohort%prt%DailyPRT(phase=2)
           
-          if((.not.newly_recovered) .and. (hlm_use_tree_damage .eq. itrue) ) then
+          if ((.not.newly_recovered) .and. hlm_runtime_params_inst%get_use_tree_damage()) then
              ! The loop order is shortest to tallest
              ! The recovered cohort (ie one with larger targets)
              ! is newly created in DamageRecovery(), and
@@ -659,13 +633,13 @@ contains
           ! BOC...update tree 'hydraulic geometry'
           ! (size --> heights of elements --> hydraulic path lengths -->
           ! maximum node-to-node conductances)
-          if( (hlm_use_planthydro.eq.itrue) .and. do_growthrecruiteffects) then
+          if (hlm_runtime_params_inst%get_use_planthydro() .and. do_growthrecruiteffects) then
              call UpdateSizeDepPlantHydProps(currentSite,currentCohort, bc_in)
              call UpdateSizeDepPlantHydStates(currentSite,currentCohort)
           end if
 
           ! if we are in age-dependent mortality mode
-          if (hlm_use_cohort_age_tracking .eq. itrue) then
+          if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
              ! update cohort age
              currentCohort%coage = currentCohort%coage + hlm_freq_day
              if(currentCohort%coage < 0.0_r8)then
@@ -693,7 +667,7 @@ contains
 
    ! Update history diagnostics related to Nutrients (if any)
    ! -----------------------------------------------------------------------------
-   select case(hlm_parteh_mode)
+   select case(hlm_runtime_params_inst%get_parteh_mode())
    case (prt_cnp_flex_allom_hyp)
       call fates_hist%update_history_nutrflux(currentSite)
    end select
@@ -702,7 +676,7 @@ contains
 
    ! the water balance.
 
-    if( hlm_use_planthydro == itrue ) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
        currentPatch => currentSite%youngest_patch
        do while(associated(currentPatch))
           currentCohort => currentPatch%shortest
@@ -774,8 +748,7 @@ contains
     ! Trim_canopy to figure out the target leaf biomass.
     ! Extra recruitment to fill empty patches.
     !
-    ! !USES:
-    use EDCanopyStructureMod , only : canopy_spread, canopy_structure
+  
     !
     ! !ARGUMENTS:
     type(fates_site_type) , intent(inout), target :: currentSite
@@ -785,13 +758,13 @@ contains
     ! !LOCAL VARIABLES:
     type (fates_patch_type) , pointer :: currentPatch
     !-----------------------------------------------------------------------
-    if(hlm_use_sp.eq.ifalse)then
+    if (.not. hlm_runtime_params_inst%get_use_sp())then
       call canopy_spread(currentSite)
     end if
 
     call TotalBalanceCheck(currentSite,6)
 
-    if(hlm_use_sp.eq.ifalse)then
+    if (.not. hlm_runtime_params_inst%get_use_sp()) then
        call canopy_structure(currentSite, bc_in)
     endif
 
@@ -834,7 +807,7 @@ contains
     ! If this is the second to last day of the year, then perform trimming
     if( hlm_day_of_year == hlm_days_per_year-1) then
 
-     if(hlm_use_sp.eq.ifalse)then
+     if (.not. hlm_runtime_params_inst%get_use_sp()) then
        call trim_canopy(currentSite)
      endif
     endif
@@ -890,7 +863,7 @@ contains
                                                     ! upon fail (lots of text)
     !-----------------------------------------------------------------------
 
-  if(hlm_use_sp.eq.ifalse)then
+  if (.not. hlm_runtime_params_inst%get_use_sp()) then
 
     change_in_stock = 0.0_r8
 

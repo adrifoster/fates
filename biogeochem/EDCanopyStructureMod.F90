@@ -30,9 +30,7 @@ module EDCanopyStructureMod
   use EDLoggingMortalityMod , only : UpdateHarvestC
   use FatesGlobals          , only : endrun => fates_endrun
   use FatesInterfaceTypesMod     , only : hlm_days_per_year
-  use FatesInterfaceTypesMod     , only : hlm_use_planthydro
-  use FatesInterfaceTypesMod     , only : hlm_use_cohort_age_tracking
-  use FatesInterfaceTypesMod     , only : hlm_use_sp
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
   use FatesInterfaceTypesMod     , only : numpft
   use FatesInterfaceTypesMod, only : bc_in_type
   use FatesPlantHydraulicsMod, only : UpdateH2OVeg,InitHydrCohort, RecruitWaterStorage
@@ -680,7 +678,7 @@ contains
                 copyc%prt => null()
                 call InitPRTObject(copyc%prt)
 
-                if( hlm_use_planthydro.eq.itrue ) then
+                if (hlm_runtime_params_inst%get_use_planthydro()) then
                    call InitHydrCohort(currentSite,copyc)
                 endif
 
@@ -1149,7 +1147,7 @@ contains
                    call InitPRTObject(copyc%prt)
                    
 
-                   if( hlm_use_planthydro.eq.itrue ) then
+                   if (hlm_runtime_params_inst%get_use_planthydro()) then
                       call InitHydrCohort(CurrentSite,copyc)
                    endif
 
@@ -1295,8 +1293,6 @@ contains
     ! ----------------------------------------------------------------------------------
     ! Much of this routine was once ed_clm_link minus all the IO and history stuff
     ! ---------------------------------------------------------------------------------
-
-    use FatesInterfaceTypesMod    , only : hlm_use_cohort_age_tracking
     use EDPatchDynamicsMod   , only : set_patchno
     use FatesSizeAgeTypeIndicesMod, only : sizetype_class_index
     use FatesSizeAgeTypeIndicesMod, only : coagetype_class_index
@@ -1359,12 +1355,12 @@ contains
              call sizetype_class_index(currentCohort%dbh,currentCohort%pft, &
                   currentCohort%size_class,currentCohort%size_by_pft_class)
 
-             if (hlm_use_cohort_age_tracking .eq. itrue) then
+             if (hlm_runtime_params_inst%get_use_cohort_age_tracking()) then
                 call coagetype_class_index(currentCohort%coage,currentCohort%pft, &
                      currentCohort%coage_class,currentCohort%coage_by_pft_class)
              end if
 
-             if(hlm_use_sp.eq.ifalse)then
+             if (.not. hlm_runtime_params_inst%get_use_sp()) then
                 call carea_allom(currentCohort%dbh,currentCohort%n,sites(s)%spread,&
                      currentCohort%pft,currentCohort%crowndamage, currentCohort%c_area)
              endif
@@ -1382,7 +1378,7 @@ contains
                 call endrun(msg=errMsg(sourcefile, __LINE__))
              end if
 
-             if(hlm_use_sp.eq.itrue)then
+             if (hlm_runtime_params_inst%get_use_sp()) then
 
                 if(associated(currentPatch%tallest%shorter))then
                    write(fates_log(),*) 'more than one cohort in SP mode',s,currentPatch%nocomp_pft_label
@@ -1996,7 +1992,7 @@ contains
        ! to not be included in the site level balance yet, for they
        ! will demand the water for their initialization on the first hydraulics time-step
 
-       if (hlm_use_planthydro.eq.itrue) then
+       if (hlm_runtime_params_inst%get_use_planthydro()) then
           call UpdateH2OVeg(sites(s),bc_out(s),bc_out(s)%plant_stored_h2o_si,1)
        end if
 
@@ -2012,7 +2008,7 @@ contains
     ! will not actually be moved until the beginning of the first hydraulics
     ! call during the fast timestep sequence
 
-    if (hlm_use_planthydro.eq.itrue) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
        call RecruitWaterStorage(nsites,sites,bc_out)
     end if
 
@@ -2191,7 +2187,7 @@ contains
         currentCohort%n, currentCohort%canopy_layer,               &
         canopy_layer_tlai,currentCohort%vcmax25top )
  
-   if (hlm_use_sp .eq. ifalse) then
+   if (.not. hlm_runtime_params_inst%get_use_sp()) then
       currentCohort%treesai = tree_sai(currentCohort%pft, currentCohort%dbh, currentCohort%crowndamage, &
                                        currentCohort%canopy_trim, &
                                        currentCohort%c_area, currentCohort%n, currentCohort%canopy_layer, &
@@ -2250,7 +2246,7 @@ contains
        ! If so we need to make another layer.
        if(arealayer > currentPatch%area)then
           z = z + 1
-          if(hlm_use_sp.eq.itrue)then
+          if (hlm_runtime_params_inst%get_use_sp()) then
              if(debug)then
                 write(fates_log(),*) 'SPmode, canopy_layer full:',arealayer,currentPatch%area
              end if

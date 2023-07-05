@@ -1695,7 +1695,6 @@ end subroutine flush_hvars
        hlms, upfreq, ivar, initialize, index, flush_to_zero)
 
     use FatesUtilsMod, only     : check_hlm_list
-    use FatesInterfaceTypesMod, only : hlm_name
 
     implicit none
 
@@ -1738,7 +1737,7 @@ end subroutine flush_hvars
        endif
     endif
 
-    write_var = check_hlm_list(trim(hlms), trim(hlm_name))
+    write_var = check_hlm_list(trim(hlms), trim(hlm_runtime_params_inst%get_hlm_name()))
     if( write_var ) then
        ivar  = ivar+1
        index = ivar

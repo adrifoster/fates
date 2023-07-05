@@ -16,10 +16,8 @@ module EDMortalityFunctionsMod
    use FatesAllometryMod     , only : bleaf
    use FatesAllometryMod     , only : storage_fraction_of_target
    use FatesInterfaceTypesMod     , only : bc_in_type
-   use FatesInterfaceTypesMod     , only : hlm_use_ed_prescribed_phys
    use FatesInterfaceTypesMod     , only : hlm_freq_day
-   use FatesInterfaceTypesMod     , only : hlm_use_planthydro
-   use FatesInterfaceTypesMod     , only : hlm_use_tree_damage
+   use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
    use EDLoggingMortalityMod , only : LoggingMortality_frac
    use EDParamsMod           , only : fates_mortality_disturbance_fraction
 
@@ -124,14 +122,14 @@ contains
     end if
 
     ! Damage dependent mortality
-    if (hlm_use_tree_damage .eq. itrue) then
+    if (hlm_runtime_params_inst%get_use_tree_damage()) then
        call GetDamageMortality(cohort_in%crowndamage, cohort_in%pft, dgmort)
     else
        dgmort = 0.0_r8
     end if
 
     
-    if (hlm_use_ed_prescribed_phys .eq. ifalse) then
+    if (.not. hlm_runtime_params_inst%get_use_ed_prescribed_phys()) then
 
        ! 'Background' mortality (can vary as a function of 
        !  density as in ED1.0 and ED2.0, but doesn't here for tractability) 
@@ -141,7 +139,7 @@ contains
        ! Proxy for hydraulic failure induced mortality. 
        hf_sm_threshold = EDPftvarcon_inst%hf_sm_threshold(cohort_in%pft)
        hf_flc_threshold = EDPftvarcon_inst%hf_flc_threshold(cohort_in%pft)
-       if(hlm_use_planthydro.eq.itrue)then
+       if (hlm_runtime_params_inst%get_use_planthydro()) then
           !note the flc is set as the fraction of max conductivity in hydro
           min_fmc_ag = minval(cohort_in%co_hydr%ftc_ag(:))
           min_fmc_tr = cohort_in%co_hydr%ftc_troot

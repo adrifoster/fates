@@ -18,12 +18,8 @@ module FatesRestartInterfaceMod
   use FatesInterfaceTypesMod,       only : nlevcoage
   use FatesInterfaceTypesMod,       only : bc_in_type
   use FatesInterfaceTypesMod,       only : bc_out_type
-  use FatesInterfaceTypesMod,       only : hlm_use_planthydro
-  use FatesInterfaceTypesMod,       only : hlm_parteh_mode
-  use FatesInterfaceTypesMod,       only : hlm_use_sp
-  use FatesInterfaceTypesMod,       only : hlm_use_nocomp, hlm_use_fixed_biogeog
+  use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
   use FatesInterfaceTypesMod,       only : fates_maxElementsPerSite
-  use FatesInterfaceTypesMod, only : hlm_use_tree_damage
   use FatesHydraulicsMemMod,   only : nshell
   use FatesHydraulicsMemMod,   only : n_hypool_ag
   use FatesHydraulicsMemMod,   only : n_hypool_troot
@@ -742,7 +738,7 @@ contains
          long_name='ed cohort - l2fr', units='fraction', flushval = flushzero, &
          hlms='CLM:ALM', initialize=initialize_variables, ivar=ivar, index = ir_l2fr_co )
 
-    if(hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+    if(hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp) then
     
        call this%set_restart_var(vname='fates_cx_int', vtype=cohort_r8, &
             long_name='ed cohort - emacx', units='fraction', flushval = flushzero, &
@@ -973,7 +969,7 @@ contains
          long_name='are of the ED patch', units='m2', flushval = flushzero, &
          hlms='CLM:ALM', initialize=initialize_variables, ivar=ivar, index = ir_area_pa )
 
-    if(hlm_use_sp.eq.ifalse)then
+    if (.not. hlm_runtime_params_inst%get_use_sp())then
        call this%set_restart_var(vname='fates_scorch_ht_pa_pft', vtype=cohort_r8, &
             long_name='scorch height', units='m', flushval = flushzero, &
             hlms='CLM:ALM', initialize=initialize_variables, ivar=ivar, index = ir_scorch_ht_pa_pft)
@@ -987,7 +983,7 @@ contains
 
 
     ! Patch Level Litter Pools are potentially multi-element
-    if(hlm_use_sp.eq.ifalse)then
+    if (.not. hlm_runtime_params_inst%get_use_sp()) then
        call this%RegisterCohortVector(symbol_base='fates_ag_cwd', vtype=cohort_r8, &
             long_name_base='above ground CWD',  &
             units='kg/m2', veclength=num_elements, flushval = flushzero, &
@@ -1051,7 +1047,7 @@ contains
     end if
     
     ! Site level flux diagnostics for each element
-    if(hlm_use_sp.eq.ifalse)then
+    if (.not. hlm_runtime_params_inst%get_use_sp()) then
        call this%RegisterCohortVector(symbol_base='fates_cwdagin', vtype=cohort_r8, &
             long_name_base='Input flux of AG CWD', &
             units='kg/ha', veclength=num_elements, flushval = flushzero, &
@@ -1093,7 +1089,7 @@ contains
     
     ! Only register satellite phenology related restart variables if it is turned on!
 
-    if(hlm_use_sp .eq. itrue) then
+    if (hlm_runtime_params_inst%get_use_sp()) then
          call this%set_restart_var(vname='fates_cohort_area', vtype=cohort_r8, &
              long_name='area of the fates cohort', &
              units='m2', flushval = flushzero, &
@@ -1115,7 +1111,7 @@ contains
 
     ! Only register hydraulics restart variables if it is turned on!
 
-    if(hlm_use_planthydro==itrue) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
 
        if ( fates_maxElementsPerSite < (nshell * nlevsoi_hyd_max) ) then
           write(fates_log(), *) ' Ftes plant hydraulics needs space to store site-level hydraulics info.'
@@ -1760,7 +1756,6 @@ contains
         hlms,initialize,ivar,index)
 
     use FatesUtilsMod, only : check_hlm_list
-    use FatesInterfaceTypesMod, only : hlm_name
 
     ! arguments
     class(fates_restart_interface_type) :: this
@@ -1785,7 +1780,7 @@ contains
 
     logical :: use_var
 
-    use_var = check_hlm_list(trim(hlms), trim(hlm_name))
+    use_var = check_hlm_list(trim(hlms), trim(hlm_runtime_params_inst%get_hlm_name()))
 
 
     if( use_var ) then
@@ -2043,7 +2038,7 @@ contains
           end do
 
 
-          if(hlm_use_sp.eq.ifalse)then
+          if(.not. hlm_runtime_params_inst%get_use_sp()) then
              do el = 1, num_elements
 
                 io_idx_si_cwd = io_idx_co_1st
@@ -2130,7 +2125,7 @@ contains
 
                 rio_l2fr_co(io_idx_co)         = ccohort%l2fr
                 
-                if(hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+                if (hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp) then
                    this%rvars(ir_cx_int_co)%r81d(io_idx_co)       = ccohort%cx_int
                    this%rvars(ir_emadcxdt_co)%r81d(io_idx_co)     = ccohort%ema_dcxdt
                    this%rvars(ir_cx0_co)%r81d(io_idx_co)          = ccohort%cx0
@@ -2143,7 +2138,7 @@ contains
                    this%rvars(ir_daily_p_demand_co)%r81d(io_idx_co) = ccohort%daily_p_demand
                 end if
 
-                if(hlm_use_planthydro==itrue)then
+                if (hlm_runtime_params_inst%get_use_planthydro()) then
 
                    ! Load the water contents
                    call this%SetCohortRealVector(ccohort%co_hydr%th_ag,n_hypool_ag, &
@@ -2202,7 +2197,7 @@ contains
                    rio_isnew_co(io_idx_co)     = old_cohort
                 endif
 
-                if (hlm_use_sp .eq. itrue) then
+                if (hlm_runtime_params_inst%get_use_sp()) then
                     this%rvars(ir_c_area_co)%r81d(io_idx_co) = ccohort%c_area
                     this%rvars(ir_treelai_co)%r81d(io_idx_co) = ccohort%treelai
                     this%rvars(ir_treesai_co)%r81d(io_idx_co) = ccohort%treesai
@@ -2256,7 +2251,7 @@ contains
              endif
 
 
-             if(hlm_use_sp.eq.ifalse)then
+             if (.not. hlm_runtime_params_inst%get_use_sp()) then
 
                 io_idx_pa_pft  = io_idx_co_1st
                 do i = 1,numpft
@@ -2326,7 +2321,7 @@ contains
                 io_idx_pa_ib = io_idx_pa_ib + 1
              end do
 
-             if (hlm_use_sp .eq. itrue) then
+             if (hlm_runtime_params_inst%get_use_sp()) then
                do i = 1,nclmax
                  this%rvars(ir_canopy_layer_tlai_pa)%r81d(io_idx_pa_ncl) = cpatch%canopy_layer_tlai(i)
                  io_idx_pa_ncl = io_idx_pa_ncl + 1
@@ -2387,7 +2382,7 @@ contains
 
           ! this only copies live portions of transitions - but that's ok because the mortality
           ! bit only needs to be added for history outputs
-          if(hlm_use_tree_damage .eq. itrue) then
+          if (hlm_runtime_params_inst%get_use_tree_damage()) then
              
              do i_scls = 1, nlevsclass
                 do i_cdam = 1, nlevdamage
@@ -2471,7 +2466,7 @@ contains
           ! Set site-level hydraulics arrays
           ! -----------------------------------------------------------------------------
 
-          if(hlm_use_planthydro==itrue)then
+          if (hlm_runtime_params_inst%get_use_planthydro()) then
 
              ! No associate statements because there is no gaurantee these
              ! are allocated
@@ -2517,7 +2512,7 @@ contains
      use FatesPatchMod,           only : fates_patch_type
      use FatesConstantsMod,          only : maxSWb
      use FatesInterfaceTypesMod,    only : fates_maxElementsPerPatch
-     use FatesInterfaceTypesMod,    only : hlm_current_tod, hlm_numSWb, numpft
+     use FatesInterfaceTypesMod,    only : hlm_current_tod, numpft
 
      use FatesConstantsMod,    only : maxpft
      use FatesConstantsMod,           only : area
@@ -2587,9 +2582,9 @@ contains
              nocomp_pft = fates_unset_int
              ! the nocomp_pft label is set after patch creation has occured in 'get_restart_vectors'
              ! make new patch
-             call newp%Create(fates_unset_r8, fates_unset_r8, primaryforest,   &
-               nocomp_pft, hlm_numSWb, numpft, sites(s)%nlevsoil,              &
-               hlm_current_tod)
+             call newp%Create(fates_unset_r8, fates_unset_r8, primaryforest,             &
+              nocomp_pft, hlm_runtime_params_inst%get_num_swb(), numpft,                 &
+              sites(s)%nlevsoil, hlm_current_tod)
 
              ! Initialize the litter pools to zero, these
              ! pools will be populated by looping over the existing patches
@@ -2645,7 +2640,7 @@ contains
 
 
                 ! Allocate hydraulics arrays
-                if( hlm_use_planthydro.eq.itrue ) then
+                if (hlm_runtime_params_inst%get_use_planthydro()) then
                    call InitHydrCohort(sites(s),new_cohort)
                 end if
 
@@ -2928,7 +2923,8 @@ contains
           enddo
 
           ! calculate the bareground area for the pft in no competition + fixed biogeo modes
-          if (hlm_use_nocomp .eq. itrue .and. hlm_use_fixed_biogeog .eq. itrue) then
+          if (hlm_runtime_params_inst%get_use_nocomp() .and.                             &
+            hlm_runtime_params_inst%get_use_fixed_biogeog()) then 
              if (area-sum(sites(s)%area_pft(1:numpft)) .gt. nearzero) then
                 sites(s)%area_pft(0) = area - sum(sites(s)%area_pft(1:numpft))
              else
@@ -2937,7 +2933,7 @@ contains
           endif
 
           ! Mass balance and diagnostics across elements at the site level
-          if(hlm_use_sp.eq.ifalse)then
+          if (.not. hlm_runtime_params_inst%get_use_sp()) then
              do el = 1, num_elements
 
                 io_idx_si_cwd = io_idx_co_1st
@@ -3020,7 +3016,7 @@ contains
                 ccohort%canopy_trim  = rio_canopy_trim_co(io_idx_co)
                 ccohort%l2fr         = rio_l2fr_co(io_idx_co)
 
-                if(hlm_parteh_mode .eq. prt_cnp_flex_allom_hyp) then
+                if (hlm_runtime_params_inst%get_parteh_mode() .eq. prt_cnp_flex_allom_hyp) then
                    ccohort%cx_int       = this%rvars(ir_cx_int_co)%r81d(io_idx_co)
                    ccohort%ema_dcxdt    = this%rvars(ir_emadcxdt_co)%r81d(io_idx_co)
                    ccohort%cx0          = this%rvars(ir_cx0_co)%r81d(io_idx_co)
@@ -3074,7 +3070,7 @@ contains
 
                 ! Initialize Plant Hydraulics
 
-                if(hlm_use_planthydro==itrue)then
+                if (hlm_runtime_params_inst%get_use_planthydro()) then
 
                    ! Load the water contents
                    call this%GetCohortRealVector(ccohort%co_hydr%th_ag,n_hypool_ag, &
@@ -3092,7 +3088,7 @@ contains
                 !  (Keeping as an example)
                 !call this%GetRMeanRestartVar(ccohort%tveg_lpa, ir_tveglpa_co, io_idx_co)
                 
-                if (hlm_use_sp .eq. itrue) then
+                if (hlm_runtime_params_inst%get_use_sp()) then
                     ccohort%c_area = this%rvars(ir_c_area_co)%r81d(io_idx_co)
                     ccohort%treelai = this%rvars(ir_treelai_co)%r81d(io_idx_co)
                     ccohort%treesai = this%rvars(ir_treesai_co)%r81d(io_idx_co)
@@ -3138,7 +3134,7 @@ contains
                      ,io_idx_co,cohortsperpatch
              endif
 
-             if(hlm_use_sp.eq.ifalse)then
+             if (.not. hlm_runtime_params_inst%get_use_sp()) then
 
                 io_idx_pa_pft  = io_idx_co_1st
                 do i = 1,numpft
@@ -3211,7 +3207,7 @@ contains
                 io_idx_pa_ib = io_idx_pa_ib + 1
              end do
 
-             if (hlm_use_sp .eq. itrue) then
+             if (hlm_runtime_params_inst%get_use_sp()) then
                do i = 1,nclmax
                  cpatch%canopy_layer_tlai(i) = this%rvars(ir_canopy_layer_tlai_pa)%r81d(io_idx_pa_ncl)
                  io_idx_pa_ncl = io_idx_pa_ncl + 1
@@ -3270,7 +3266,7 @@ contains
           ! first known.
           ! -----------------------------------------------------------------------------
 
-          if(hlm_use_planthydro==itrue)then
+          if (hlm_runtime_params_inst%get_use_planthydro()) then
 
              sites(s)%si_hydr%h2oveg_recruit      = this%rvars(ir_hydro_recruit_si)%r81d(io_idx_si)
              sites(s)%si_hydr%h2oveg_dead         = this%rvars(ir_hydro_dead_si)%r81d(io_idx_si)
@@ -3319,7 +3315,7 @@ contains
              io_idx_si_sc = io_idx_si_sc + 1
           end do
           
-          if (hlm_use_tree_damage .eq. itrue) then
+          if (hlm_runtime_params_inst%get_use_tree_damage()) then
              do i_cdam = 1, nlevdamage
                 do i_pft = 1, numpft
                    do i_scls = 1, nlevsclass
@@ -3399,7 +3395,6 @@ contains
 
      use FatesPatchMod, only         : fates_patch_type
      use EDSurfaceRadiationMod, only : PatchNormanRadiation
-     use FatesInterfaceTypesMod, only     : hlm_numSWb
 
      ! !ARGUMENTS:
      class(fates_restart_interface_type) , intent(inout) :: this
@@ -3458,7 +3453,7 @@ contains
                  ! no radiation is absorbed
                  bc_out(s)%fabd_parb(ifp,:) = 0.0_r8
                  bc_out(s)%fabi_parb(ifp,:) = 0.0_r8
-                 do ib = 1,hlm_numSWb
+                 do ib = 1, hlm_runtime_params_inst%get_num_swb()
 
                     bc_out(s)%albd_parb(ifp,ib) = currentPatch%gnd_alb_dir(ib)
                     bc_out(s)%albi_parb(ifp,ib) = currentPatch%gnd_alb_dif(ib)
@@ -3475,7 +3470,8 @@ contains
                       bc_out(s)%fabi_parb(ifp,:), &
                       bc_out(s)%ftdd_parb(ifp,:), &
                       bc_out(s)%ftid_parb(ifp,:), &
-                      bc_out(s)%ftii_parb(ifp,:))
+                      bc_out(s)%ftii_parb(ifp,:), &
+                      hlm_runtime_params_inst%get_num_swb())
 
               endif ! is there vegetation?
 

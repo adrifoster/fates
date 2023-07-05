@@ -29,10 +29,9 @@ module FatesInventoryInitMod
    use FatesGlobals     , only : endrun => fates_endrun
    use FatesGlobals     , only : fates_log
    use FatesInterfaceTypesMod, only : bc_in_type
-   use FatesInterfaceTypesMod, only : hlm_inventory_ctrl_file
+   use FatesHLMRuntimeParamsMod, only : hlm_runtime_params_inst
    use FatesInterfaceTypesMod, only : nleafage
    use FatesInterfaceTypesMod, only : hlm_current_tod
-   use FatesInterfaceTypesMod, only : hlm_numSWb
    use FatesInterfaceTypesMod, only : numpft
    use FatesLitterMod   , only : litter_type
    use FatesSiteMod     , only : fates_site_type
@@ -48,7 +47,6 @@ module FatesInventoryInitMod
    use FatesConstantsMod, only : phen_dstat_moistoff
    use PRTParametersMod , only : prt_params
    use EDPftvarcon      , only : EDPftvarcon_inst
-   use FatesInterfaceTypesMod, only : hlm_parteh_mode
    use EDCohortDynamicsMod, only : InitPRTObject
    use PRTGenericMod,       only : prt_carbon_allom_hyp
    use PRTGenericMod,       only : prt_cnp_flex_allom_hyp
@@ -160,17 +158,19 @@ contains
       character(len=patchname_strlen), allocatable :: patch_name_vec(:)    ! vector of patch ID strings
       real(r8)                                     :: basal_area_postf     ! basal area before fusion (m2/ha)
       real(r8)                                     :: basal_area_pref      ! basal area after fusion (m2/ha)
+      character(len=256)                           :: inventory_ctrl_file  ! file with inventory initialization information
 
       ! I. Load the inventory list file, do some file handle checks
       ! ------------------------------------------------------------------------------------------
 
       sitelist_file_unit = shr_file_getUnit()
+      inventory_ctrl_file = hlm_runtime_params_inst%get_inventory_ctrl_file()
 
 
-      inquire(file=trim(hlm_inventory_ctrl_file),exist=lexist,opened=lopen)
+      inquire(file=trim(inventory_ctrl_file),exist=lexist,opened=lopen)
       if( .not.lexist ) then   ! The inventory file list DNE
          write(fates_log(), *) 'An inventory Initialization was requested.'
-         write(fates_log(), *) 'However the inventory file: ',trim(hlm_inventory_ctrl_file),' DNE'
+         write(fates_log(), *) 'However the inventory file: ',trim(inventory_ctrl_file),' DNE'
          write(fates_log(), *) 'Aborting'
          call endrun(msg=errMsg(sourcefile, __LINE__))
       end if
@@ -180,7 +180,7 @@ contains
          call endrun(msg=errMsg(sourcefile, __LINE__))
       end if
 
-      open(unit=sitelist_file_unit,file=trim(hlm_inventory_ctrl_file),status='OLD',action='READ',form='FORMATTED')
+      open(unit=sitelist_file_unit,file=trim(inventory_ctrl_file),status='OLD',action='READ',form='FORMATTED')
       rewind(sitelist_file_unit)
 
       ! There should be at least 1 line
@@ -276,9 +276,10 @@ contains
             age_init            = 0.0_r8
             area_init           = 0.0_r8
             allocate(newpatch)
-            call newpatch%Create(age_init, area_init, primaryforest,           &
-               fates_unset_int, hlm_numSWb, numpft, sites(s)%nlevsoil,         &
-               hlm_current_tod)
+            call newpatch%Create(age_init, area_init, primaryforest,                     &
+              fates_unset_int, hlm_runtime_params_inst%get_num_swb(), numpft,            &
+              sites(s)%nlevsoil,         &
+              hlm_current_tod)
 
             newpatch%patchno = ipa
             newpatch%younger => null()
@@ -1137,7 +1138,7 @@ contains
 
             end select
 
-            select case(hlm_parteh_mode)
+            select case(hlm_runtime_params_inst%get_parteh_mode())
             case (prt_carbon_allom_hyp,prt_cnp_flex_allom_hyp )
 
                ! Equally distribute leaf mass into available age-bins

@@ -12,9 +12,7 @@ module EDInitMod
   use FatesConstantsMod         , only : nearzero
   use FatesGlobals              , only : endrun => fates_endrun
   use FatesGlobals              , only : fates_log
-  use FatesInterfaceTypesMod    , only : hlm_is_restart
   use FatesInterfaceTypesMod    , only : hlm_current_tod
-  use FatesInterfaceTypesMod    , only : hlm_numSWb
   use EDPftvarcon               , only : EDPftvarcon_inst
   use PRTParametersMod          , only : prt_params
   use EDCohortDynamicsMod       , only : create_cohort, fuse_cohorts, sort_cohorts
@@ -41,17 +39,12 @@ module EDInitMod
   use FatesConstantsMod                , only : phen_cstat_notcold
   use FatesConstantsMod                , only : phen_dstat_moiston
   use FatesInterfaceTypesMod         , only : bc_in_type,bc_out_type
-  use FatesInterfaceTypesMod         , only : hlm_use_planthydro
-  use FatesInterfaceTypesMod         , only : hlm_use_inventory_init
-  use FatesInterfaceTypesMod         , only : hlm_use_fixed_biogeog
-  use FatesInterfaceTypesMod         , only : hlm_use_tree_damage
-  use FatesInterfaceTypesMod         , only : hlm_use_sp
+  use FatesHLMRuntimeParamsMod,        only : hlm_runtime_params_inst
   use FatesInterfaceTypesMod         , only : numpft
   use FatesInterfaceTypesMod         , only : nleafage
   use FatesInterfaceTypesMod         , only : nlevsclass
   use FatesInterfaceTypesMod         , only : nlevcoage
   use FatesInterfaceTypesMod         , only : nlevdamage
-  use FatesInterfaceTypesMod         , only : hlm_use_nocomp
   use FatesInterfaceTypesMod         , only : nlevage
   use FatesAllometryMod         , only : h2d_allom
   use FatesAllometryMod         , only : bagw_allom
@@ -63,7 +56,6 @@ module EDInitMod
   use FatesAllometryMod         , only : bstore_allom
   use FatesAllometryMod         , only : carea_allom
   use PRTGenericMod             , only : StorageNutrientTarget
-  use FatesInterfaceTypesMod,      only : hlm_parteh_mode
   use PRTGenericMod,          only : prt_carbon_allom_hyp
   use PRTGenericMod,          only : prt_cnp_flex_allom_hyp
   use PRTGenericMod,          only : prt_vartypes
@@ -150,7 +142,7 @@ contains
     ! Two primary options, either a Near Bear Ground (NBG) or Inventory based cold-start
     ! ---------------------------------------------------------------------------------------------
 
-    if ( hlm_use_inventory_init.eq.itrue ) then
+    if (hlm_runtime_params_inst%get_use_inventory_init()) then
 
        ! Initialize the site-level crown area spread factor (0-1)
        ! It is likely that closed canopy forest inventories
@@ -184,9 +176,9 @@ contains
           sites(s)%spread     = init_spread_near_bare_ground
 
           start_patch = 1   ! start at the first vegetated patch
-          if(hlm_use_nocomp.eq.itrue)then
+          if (hlm_runtime_params_inst%get_use_nocomp()) then
              num_new_patches = numpft
-             if( hlm_use_fixed_biogeog .eq.itrue )then
+             if (hlm_runtime_params_inst%get_use_fixed_biogeog()) then
                 start_patch = 0 ! start at the bare ground patch
              endif
              !           allocate(newppft(numpft))
@@ -198,20 +190,20 @@ contains
           do n = start_patch, num_new_patches
 
              ! set the PFT index for patches if in nocomp mode.
-             if(hlm_use_nocomp.eq.itrue)then
+             if (hlm_runtime_params_inst%get_use_nocomp()) then
                 nocomp_pft = n
              else
                 nocomp_pft = fates_unset_int
              end if
 
-             if(hlm_use_nocomp.eq.itrue)then
+             if (hlm_runtime_params_inst%get_use_nocomp()) then
                 ! In no competition mode, if we are using the fixed_biogeog filter
                 ! then each PFT has the area dictated  by the surface dataset.
 
                 ! If we are not using fixed biogeog model, each PFT gets the same area.
                 ! i.e. each grid cell is divided exactly into the number of FATES PFTs.
 
-                if(hlm_use_fixed_biogeog.eq.itrue)then
+                if (hlm_runtime_params_inst%get_use_fixed_biogeog()) then
                    newparea = sites(s)%area_pft(nocomp_pft)
                 else
                    newparea = area / numpft
@@ -222,8 +214,9 @@ contains
 
              if(newparea.gt.0._r8)then ! Stop patches being initilialized when PFT not present in nocomop mode
                 allocate(newp)
-                call newp%Create(age, newparea, primaryforest, nocomp_pft,     &
-                  hlm_numSWb, numpft, sites(s)%nlevsoil, hlm_current_tod)
+                call newp%Create(age, newparea, primaryforest, nocomp_pft,               &
+                  hlm_runtime_params_inst%get_num_swb(), numpft, sites(s)%nlevsoil,      &
+                  hlm_current_tod)
 
                 if(is_first_patch.eq.itrue)then !is this the first patch?
                    ! set poointers for first patch (or only patch, if nocomp is false)
@@ -256,7 +249,7 @@ contains
                 end do
 
                 sitep => sites(s)
-                if(hlm_use_sp.eq.itrue)then
+                if (hlm_runtime_params_inst%get_use_sp()) then
                    if(nocomp_pft.ne.0)then !don't initialize cohorts for SP bare ground patch
                       call init_cohorts(sitep, newp, bc_in(s))
                    end if
@@ -335,7 +328,7 @@ contains
     ! This sets the rhizosphere shells based on the plant initialization
     ! The initialization of the plant-relevant hydraulics variables
     ! were set from a call inside of the init_cohorts()->create_cohort() subroutine
-    if (hlm_use_planthydro.eq.itrue) then
+    if (hlm_runtime_params_inst%get_use_planthydro()) then
        do s = 1, nsites
           sitep => sites(s)
           call updateSizeDepRhizHydProps(sitep, bc_in(s))
@@ -404,15 +397,17 @@ contains
     do pft = 1, numpft
       ! first turn every PFT ON, unless we are in a special case
       use_pft_local(pft) = itrue ! Case 1
-      if (hlm_use_fixed_biogeog .eq. itrue) then !filter geographically
+      if (hlm_runtime_params_inst%get_use_fixed_biogeog()) then !filter geographically
         use_pft_local(pft) = site_in%use_this_pft(pft) ! Case 2
-        if (hlm_use_nocomp .eq. itrue .and. pft .ne. patch_in%nocomp_pft_label) then
+        if (hlm_runtime_params_inst%get_use_nocomp() .and.                               &
+          pft .ne. patch_in%nocomp_pft_label) then
           ! having set the biogeog filter as on or off, turn off all PFTs
           ! whose identity does not correspond to this patch label
           use_pft_local(pft) = ifalse ! Case 3
         endif
       else
-        if (hlm_use_nocomp .eq. itrue .and. pft .ne. patch_in%nocomp_pft_label) then
+        if (hlm_runtime_params_inst%get_use_nocomp() .and.                               &
+          pft .ne. patch_in%nocomp_pft_label) then
           ! This case has all PFTs on their own patch everywhere
           use_pft_local(pft) = ifalse ! Case 4
         endif
@@ -434,7 +429,7 @@ contains
         if (EDPftvarcon_inst%initd(pft) > nearzero) then  ! interpret as initial density and calculate diameter
           
           cohort_n = EDPftvarcon_inst%initd(pft)*patch_in%area
-          if (hlm_use_nocomp .eq. itrue) then !in nocomp mode we only have one PFT per patch
+          if (hlm_runtime_params_inst%get_use_nocomp()) then !in nocomp mode we only have one PFT per patch
             ! as opposed to numpft's. So we should up the initial density
             ! to compensate (otherwise runs are very hard to compare)
             ! this multiplies it by the number of PFTs there would have been in
@@ -444,7 +439,7 @@ contains
           endif
              
           ! h, dbh, leafc, n from SP values or from small initial size
-          if (hlm_use_sp .eq. itrue) then
+          if (hlm_runtime_params_inst%get_use_sp()) then
             ! At this point, we do not know the bc_in values of tlai tsai and htop,
             ! so this is initializing to an arbitrary value for the very first timestep.
             ! Not sure if there's a way around this or not.
@@ -461,7 +456,7 @@ contains
           endif  ! sp mode
 
         else ! interpret as initial diameter and calculate density 
-          if (hlm_use_nocomp .eq. itrue) then
+          if (hlm_runtime_params_inst%get_use_nocomp()) then
             dbh = abs(EDPftvarcon_inst%initd(pft))
             ! calculate crown area of a single plant
             call carea_allom(dbh, 1.0_r8, init_spread_inventory, pft, crown_damage,       &
@@ -500,7 +495,7 @@ contains
 
         stem_drop_fraction = EDPftvarcon_inst%phen_stem_drop_fraction(pft)
 
-        if (hlm_use_sp .eq. ifalse) then ! do not override SP vales with phenology
+        if (.not. hlm_runtime_params_inst%get_use_sp()) then ! do not override SP vales with phenology
 
           if (prt_params%season_decid(pft) == itrue .and.                                &
             any(site_in%cstatus == [phen_cstat_nevercold, phen_cstat_iscold])) then
@@ -563,7 +558,7 @@ contains
 
           end select
 
-          select case(hlm_parteh_mode)
+          select case(hlm_runtime_params_inst%get_parteh_mode())
           case (prt_carbon_allom_hyp, prt_cnp_flex_allom_hyp )
 
             ! Put all of the leaf mass into the first bin
