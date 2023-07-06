@@ -550,8 +550,8 @@ module FatesSiteMod
   
     ! ====================================================================================
 
-    subroutine Create(this, num_levsoil, zi_sisl, dz_sisl, z_sisl, fixed_biogeog,        &
-        no_comp, day_of_year, pft_areafrac)
+    subroutine Create(this, num_levsoil, zi_sisl, dz_sisl, z_sisl, day_of_year,           &
+      pft_areafrac)
       !
       ! DESCRIPTION:
       !   creates a new site object
@@ -563,8 +563,6 @@ module FatesSiteMod
       real(r8),               intent(in)    :: zi_sisl(:)      ! soil interface level below a "z" level [m]
       real(r8),               intent(in)    :: dz_sisl(:)      ! soil layer thickness [m]
       real(r8),               intent(in)    :: z_sisl(:)       ! soil layer depth [m]
-      integer,                intent(in)    :: fixed_biogeog   ! are we using fixed biogegraphy mode?
-      integer,                intent(in)    :: no_comp         ! are we using no-comp mode?
       integer,                intent(in)    :: day_of_year     ! HLM day of year
       real(r8),               intent(in)    :: pft_areafrac(:) ! fractional area of the FATES column occupied by each PFT [0-1]
 
@@ -598,7 +596,7 @@ module FatesSiteMod
       ! we initialize on a cold-start to -1
       this%ema_npp = -9999._r8
 
-      if (fixed_biogeog == itrue) then
+      if (hlm_runtime_params_inst%get_use_fixed_biogeog()) then
         ! MAPPING OF FATES PFTs on to HLM_PFTs
         ! add up the area associated with each FATES PFT
         ! where pft_areafrac is the area of land in each HLM PFT and (from surface dataset)
@@ -630,7 +628,7 @@ module FatesSiteMod
         ! the bare ground will no longer be prescribed and should emerge from FATES
         ! this may or may not be the right way to deal with this?
         sumarea = sum(this%area_pft(1:numpft))
-        if (no_comp == ifalse) then ! when not in nocomp (i.e. or SP) mode, 
+        if (.not. hlm_runtime_params_inst%get_use_nocomp()) then ! when not in nocomp (i.e. or SP) mode, 
           ! subsume bare ground evenly into the existing patches.
           do ft = 1, numpft
             if (sumarea > 0._r8) then
@@ -665,7 +663,7 @@ module FatesSiteMod
         ! Setting this to true ensures that all pfts
         ! are used for nocomp with no biogeog
         this%use_this_pft(ft) = itrue
-        if (fixed_biogeog == itrue) then
+        if (hlm_runtime_params_inst%get_use_fixed_biogeog()) then
           if (this%area_pft(ft) > 0.0_r8) then
             this%use_this_pft(ft) = itrue
           else

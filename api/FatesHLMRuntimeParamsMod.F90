@@ -14,7 +14,6 @@ module FatesHLMRuntimeParamsMod
   use FatesGlobals,        only : endrun => fates_endrun
   use FatesFinalParamType, only : real_param, character_param
   use FatesFinalParamType, only : logical_param, integer_param
-  use FatesFinalParamType, only : char_len
   use PRTGenericMod,       only : prt_cnp_flex_allom_hyp
 
   use shr_log_mod,         only : errMsg => shr_log_errMsg
@@ -242,31 +241,17 @@ module FatesHLMRuntimeParamsMod
 
     ! ------------------------------------------------------------------------------------
 
-    subroutine check_compatibility(this, prescribed_puptake, prescribed_nuptake,         &
-        mort_ip_age_senescence)
+    subroutine check_compatibility(this)
       !
       !  DESCRIPTION:
       !  check that parameter values are compatible with one another
       !
 
       ! ARGUMENTS:
-      class(hlm_runtime_params),              intent(inout) :: this                      ! runtime params object
-      real(r8),                  allocatable, intent(in)    :: prescribed_puptake(:)     ! prescribed uptake rate for phosphorous, this is the fraction of plant demand
-      real(r8),                  allocatable, intent(in)    :: prescribed_nuptake(:)     ! prescribed uptake rate for nitrogen, this is the fraction of plant demand
-      real(r8),                  allocatable, intent(in)    :: mort_ip_age_senescence(:) ! inflection point of age-dependent senescence
+      class(hlm_runtime_params),              intent(inout) :: this ! runtime params object
 
       ! first make sure all parameters are set
       call this%check_all_set()
-
-      if (this%hlm_name%get_value() == 'CLM' .and. this%parteh_mode%get_value() == 2) then 
-        if (sum(abs(prescribed_puptake(:))) < nearzero .and.                             &
-          sum(abs(prescribed_nuptake(:))) < nearzero) then
-          write(fates_log(),*) 'PARTEH hypothesis 2 is only viable'                                                     
-          write(fates_log(),*) 'with forced boundary conditions for CLM (currently)'      
-          write(fates_log(),*) 'prescribed_puptake or prescribed_nuptake must > 0'
-          call throw_if_incompatible()
-        end if
-      end if 
 
       if (this%use_tree_damage%get_value() .and.                                         &
         this%parteh_mode%get_value() == prt_cnp_flex_allom_hyp) then 
@@ -274,15 +259,6 @@ module FatesHLMRuntimeParamsMod
         write(fates_log(),*) '(yet) compatible with CNP allocation (fates_parteh_mode = 2)'                                      
         call throw_if_incompatible()
       end if 
-
-      if (any(mort_ip_age_senescence < fates_check_param_set) .and.                      &
-        .not. this%use_cohort_age_tracking%get_value()) then
-        write(fates_log(),*) 'Age-dependent mortality cannot be on if'                 
-        write(fates_log(),*) 'cohort age tracking is off.'                                   
-        write(fates_log(),*) 'Set use_fates_cohort_age_tracking = .true.'                   
-        write(fates_log(),*) 'in FATES namelist options.'                                   
-        call throw_if_incompatible()
-      end if
       
       if (this%use_inventory_init%get_value() .and.                                      &
         this%use_cohort_age_tracking%get_value()) then 
@@ -525,7 +501,7 @@ module FatesHLMRuntimeParamsMod
 
       ! ARGUMENTS:
       class(hlm_runtime_params), intent(inout) :: this     ! runtime params object
-      character(char_len),       intent(in)    :: hlm_name ! character string passed by the HLM used during the processing of IO data
+      character(len=*),          intent(in)    :: hlm_name ! character string passed by the HLM used during the processing of IO data
       
       call this%hlm_name%set_value(hlm_name)
 
@@ -533,16 +509,18 @@ module FatesHLMRuntimeParamsMod
 
     ! ------------------------------------------------------------------------------------
 
-    character(char_len) function get_hlm_name(this)
+    function get_hlm_name(this) result(res)
       !
       !  DESCRIPTION:
       !  gets hlm_name value
       !
 
       ! ARGUMENTS:
+      character(:), allocatable             :: res
       class(hlm_runtime_params), intent(in) :: this ! runtime params object
 
-      get_hlm_name = this%hlm_name%get_value()
+
+      res = trim(this%hlm_name%get_value())
 
     end function get_hlm_name
 
@@ -556,7 +534,7 @@ module FatesHLMRuntimeParamsMod
 
       ! ARGUMENTS:
       class(hlm_runtime_params), intent(inout) :: this          ! runtime params object
-      character(char_len),       intent(in)    :: decomp_scheme ! which soil decomposition scheme is active
+      character(len=*),          intent(in)    :: decomp_scheme ! which soil decomposition scheme is active
       
       if (.not. ((trim(decomp_scheme) == 'MIMICS') .or.                                  &
         (trim(decomp_scheme) == 'CENTURY') .or.                                          &
@@ -572,16 +550,17 @@ module FatesHLMRuntimeParamsMod
 
     ! ------------------------------------------------------------------------------------
 
-    character(char_len) function get_decomp_scheme(this)
+    function get_decomp_scheme(this) result(res)
       !
       !  DESCRIPTION:
       !  gets decomp_scheme value
       !
 
       ! ARGUMENTS:
+      character(:), allocatable             :: res
       class(hlm_runtime_params), intent(in) :: this ! runtime params object
 
-      get_decomp_scheme = this%decomp_scheme%get_value()
+      res = this%decomp_scheme%get_value()
 
     end function get_decomp_scheme
 
@@ -595,7 +574,7 @@ module FatesHLMRuntimeParamsMod
 
       ! ARGUMENTS:
       class(hlm_runtime_params), intent(inout) :: this            ! runtime params object
-      character(char_len),       intent(in)    :: nutrient_scheme ! which soil nutrient scheme is active
+      character(len=*),          intent(in)    :: nutrient_scheme ! which soil nutrient scheme is active
       
       call this%nutrient_scheme%set_value(nutrient_scheme)
 
@@ -603,16 +582,17 @@ module FatesHLMRuntimeParamsMod
 
     ! ------------------------------------------------------------------------------------
 
-    character(char_len) function get_nutrient_scheme(this)
+    function get_nutrient_scheme(this) result(res)
       !
       !  DESCRIPTION:
       !  gets nutrient_scheme value
       !
 
       ! ARGUMENTS:
+      character(:), allocatable             :: res 
       class(hlm_runtime_params), intent(in) :: this ! runtime params object
 
-      get_nutrient_scheme = this%nutrient_scheme%get_value()
+      res = this%nutrient_scheme%get_value()
 
     end function get_nutrient_scheme
 
@@ -1353,7 +1333,7 @@ module FatesHLMRuntimeParamsMod
 
       ! ARGUMENTS:
       class(hlm_runtime_params), intent(inout) :: this                ! runtime params object
-      character(char_len),       intent(in)    :: inventory_ctrl_file ! full path to the inventory controle file that specifies available inventory
+      character(len=*),          intent(in)    :: inventory_ctrl_file ! full path to the inventory controle file that specifies available inventory
       
       call this%inventory_ctrl_file%set_value(inventory_ctrl_file)
 
@@ -1361,16 +1341,17 @@ module FatesHLMRuntimeParamsMod
 
     ! ------------------------------------------------------------------------------------
 
-    character(char_len) function get_inventory_ctrl_file(this)
+    function get_inventory_ctrl_file(this) result(res)
       !
       !  DESCRIPTION:
       !  gets inventory_ctrl_file value
       !
 
       ! ARGUMENTS:
+      character(:), allocatable             :: res
       class(hlm_runtime_params), intent(in) :: this ! runtime params object
 
-      get_inventory_ctrl_file = this%inventory_ctrl_file%get_value()
+      res = this%inventory_ctrl_file%get_value()
 
     end function get_inventory_ctrl_file
 

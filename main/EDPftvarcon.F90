@@ -1612,6 +1612,17 @@ contains
         end if
      end if
 
+     if(trim(hlm_runtime_params_inst%get_hlm_name()) == 'CLM' .and.                      &
+      hlm_runtime_params_inst%get_parteh_mode() == 2) then
+      if( sum(abs(EDPftvarcon_inst%prescribed_puptake(:)))<nearzero .and. &
+          sum(abs(EDPftvarcon_inst%prescribed_nuptake(:)))<nearzero) then
+         write(fates_log(), *) 'PARTEH hypothesis 2 is only viable with forced'
+         write(fates_log(), *) 'boundary conditions for CLM (currently).'
+         write(fates_log(), *) 'prescribed_puptake or prescribed_nuptake must > 0'
+         call endrun(msg=errMsg(sourcefile, __LINE__))
+      end if
+    end if
+
      do ipft = 1,npft
 
         ! xl must be between -0.4 and 0.6 according to Bonan (2019) doi:10.1017/9781107339217 pg. 238
@@ -1633,6 +1644,16 @@ contains
            write(fates_log(),*) 'Aborting'
            call endrun(msg=errMsg(sourcefile, __LINE__))
         end if
+
+      if ( ( ANY(EDPftvarcon_inst%mort_ip_age_senescence < fates_check_param_set )) .and. &
+        (.not. hlm_runtime_params_inst%get_use_cohort_age_tracking()) ) then
+        write(fates_log(),*) 'Age dependent mortality cannot be on if'
+        write(fates_log(),*) 'cohort age tracking is off.'
+        write(fates_log(),*) 'Set use_fates_cohort_age_tracking = .true.'
+        write(fates_log(),*) 'in FATES namelist options'
+        write(fates_log(),*) 'Aborting'
+        call endrun(msg=errMsg(sourcefile, __LINE__))
+      end if
 
         ! Check that parameter ranges for size-dependent mortality make sense
         !-----------------------------------------------------------------------------------

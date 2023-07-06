@@ -15,7 +15,6 @@ module FatesFinalParamType
   private
 
   character(len=*), parameter         :: sourcefile = __FILE__ ! for error printing
-  integer,          parameter, public :: char_len = 256        ! for character_param lengths
 
   ! ======================================================================================
 
@@ -73,7 +72,7 @@ module FatesFinalParamType
 
   type, public, extends(param) :: character_param
 
-  character(len=char_len), private :: value 
+  character(:), allocatable, private :: value 
 
   contains 
   
@@ -222,7 +221,7 @@ module FatesFinalParamType
 
       ! ARGUMENTS:
       class(character_param), intent(inout) :: this ! character param object
-      character(char_len),     intent(in)   :: val  ! value to set it to
+      character(len=*),       intent(in)    :: val  ! value to set it to
 
       if (.not. this%already_set()) then 
         this%value = trim(val)
@@ -235,17 +234,18 @@ module FatesFinalParamType
 
     ! ------------------------------------------------------------------------------------
 
-    character(len=char_len) function get_char_value(this)
+    function get_char_value(this) result(res)
       !
       !  DESCRIPTION:
       !  get the value of this parameter
       !
 
       ! ARGUMENTS:
+      character(:), allocatable          :: res  ! result
       class(character_param), intent(in) :: this ! character param object
     
       if (this%already_set()) then 
-        get_char_value = this%value 
+        res = this%value 
       else 
         call this%throw_if_bad_get()
       end if 
