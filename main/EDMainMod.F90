@@ -155,7 +155,6 @@ contains
 
     !-----------------------------------------------------------------------
 
-    write(fates_log(),*) 'Noahs ed_ecosystem_dynamics called'
 
     if (debug .and.( hlm_masterproc==itrue)) write(fates_log(),'(A,I4,A,I2.2,A,I2.2)') 'FATES Dynamics: ',&
           hlm_current_year,'-',hlm_current_month,'-',hlm_current_day
@@ -286,7 +285,6 @@ contains
     ! make new patches from disturbed land
     if (do_patch_dynamics.eq.itrue ) then
 
-       write(fates_log(),*) 'Noahs do_patch_dynamics.eq.itrue met'
        call spawn_patches(currentSite, bc_in)
 
        call TotalBalanceCheck(currentSite,3)

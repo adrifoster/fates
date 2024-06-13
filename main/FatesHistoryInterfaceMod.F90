@@ -3270,7 +3270,7 @@ contains
            hio_fire_sum_fuel_si_age           => this%hvars(ih_fire_sum_fuel_si_age)%r82d, &
            hio_burnt_frac_litter_si_fuel      => this%hvars(ih_burnt_frac_litter_si_fuel)%r82d, &
            hio_fuel_amount_si_fuel            => this%hvars(ih_fuel_amount_si_fuel)%r82d, &
-           !hio_pyro_carbon_si_fuel            => this%hvars(ih_pyro_carbon_si_fuel)%r82d, &
+           hio_pyro_carbon_si_fuel            => this%hvars(ih_pyro_carbon_si_fuel)%r82d, &
            hio_fuel_amount_age_fuel            => this%hvars(ih_fuel_amount_age_fuel)%r82d, &
            hio_canopy_height_dist_si_height   => this%hvars(ih_canopy_height_dist_si_height)%r82d, &
            hio_leaf_height_dist_si_height     => this%hvars(ih_leaf_height_dist_si_height)%r82d, &
@@ -4257,8 +4257,8 @@ contains
                    hio_burnt_frac_litter_si_fuel(io_si, i_fuel) = hio_burnt_frac_litter_si_fuel(io_si, i_fuel) + &
                         cpatch%burnt_frac_litter(i_fuel) * cpatch%frac_burnt * cpatch%area * AREA_INV
 
-!                   hio_pyro_carbon_si_fuel(io_si, i_fuel) = hio_pyro_carbon_si_fuel(io_si, i_fuel) + &
-!                        cpatch%pyrogenic_carbon(i_fuel) * cpatch%frac_burnt * cpatch%area * AREA_INV
+                   hio_pyro_carbon_si_fuel(io_si, i_fuel) = hio_pyro_carbon_si_fuel(io_si, i_fuel) + &
+                        cpatch%pyrogenic_carbon(i_fuel) * cpatch%frac_burnt * cpatch%area * AREA_INV
                 end do
 
 
@@ -7040,11 +7040,11 @@ contains
                hlms='CLM:ALM', upfreq=group_dyna_complx, ivar=ivar, initialize=initialize_variables, &
                index = ih_fuel_amount_si_fuel)
 
-          !call this%set_history_var(vname='PYRO_CARBON_FC', units='kg m-2',    &
-          !     long='spitfire fuel-class level pyrogenic carbon (charcoal,ash) in kg carbon per m2 land area', &
-          !     use_default='active', avgflag='A', vtype=site_fuel_r8,                &
-          !     hlms='CLM:ALM', upfreq=group_dyna_complx, ivar=ivar, initialize=initialize_variables, &
-          !     index = ih_pyro_carbon_si_fuel)
+          call this%set_history_var(vname='PYRO_CARBON_FC', units='kg m-2',    &
+              long='spitfire fuel-class level pyrogenic carbon (charcoal,ash) in kg carbon per m2 land area', &
+              use_default='active', avgflag='A', vtype=site_fuel_r8,                &
+              hlms='CLM:ALM', upfreq=group_dyna_complx, ivar=ivar, initialize=initialize_variables, &
+              index = ih_pyro_carbon_si_fuel)
 
           call this%set_history_var(vname='FATES_FUEL_AMOUNT_APFC', units='kg m-2',  &
                long='spitfire fuel quantity in each age x fuel class in kg carbon per m2 land area', &

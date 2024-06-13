@@ -487,8 +487,6 @@ contains
 
     !---------------------------------------------------------------------
 
-    write(fates_log(),*) 'Noahs spawn_patches called'
-
     storesmallcohort => null() ! storage of the smallest cohort for insertion routine
     storebigcohort   => null() ! storage of the largest cohort for insertion routine 
 
@@ -639,12 +637,7 @@ contains
                    cp_nocomp_matches_2_if: if ( hlm_use_nocomp .eq. ifalse .or. &
                         currentPatch%nocomp_pft_label .eq. i_nocomp_pft ) then
 
-                      write(fates_log(),*) 'Noahs cp_nocomp_matches_2_if met'
-
                       patchlabel_matches_lutype_if: if (currentPatch%land_use_label .eq. i_donorpatch_landuse_type) then
-
-                         write(fates_log(),*) 'Noahs patchlabel_matches_lutype_if met'
-
 
                          ! disturbance_rate is the fraction of the patch's area that is disturbed and donated
                          disturbance_rate = 0.0_r8
@@ -659,7 +652,6 @@ contains
                          
                          areadis_gt_zero_if: if ( patch_site_areadis > nearzero ) then
 
-                            write(fates_log(),*) 'Noahs areadis_gt_zero_if met'
 
                             if(.not.associated(newPatch))then
                                write(fates_log(),*) 'Patch spawning has attempted to point to'
@@ -1496,7 +1488,6 @@ contains
     real(r8) :: error
     real(r8) :: pyc
 
-    write(fates_log(),*) 'Noahs TransLitterNewPatch called'
 
     do el = 1,num_elements
 
@@ -1595,19 +1586,19 @@ contains
          burned_mass = max(0.0, burned_mass - pyc)
          
          ! remove old PyC burned in fire
-         currentPatch%pyrogenic_carbon = pyc_loss_fac * currentPatch%pyrogenic_carbon
+         currentPatch%pyrogenic_carbon(:) = pyc_loss_fac * currentPatch%pyrogenic_carbon(:)
 
          ! transfer pyc between patches
-         currentPatch%pyrogenic_carbon = currentPatch%pyrogenic_carbon + pyc*retain_m2
-         newPatch%pyrogenic_carbon = newPatch%pyrogenic_carbon + pyc*donate_m2
+         currentPatch%pyrogenic_carbon(c) = currentPatch%pyrogenic_carbon(c) + pyc*retain_m2
+         newPatch%pyrogenic_carbon(c) = newPatch%pyrogenic_carbon(c) + pyc*donate_m2
          
          !Noah's pyc debugging
-         write(fates_log(),*) 'Noahs pyc, pyc: ',pyc
-         write(fates_log(),*) 'Noahs pyc, burned_mass: ',burned_mass
-         write(fates_log(),*) 'Noahs pyc, currentPatch%pyrogenic_carbon: ',currentPatch%pyrogenic_carbon
-         write(fates_log(),*) 'Noahs pyc, pyc_loss_fac: ',pyc_loss_fac
-         write(fates_log(),*) 'Noahs pyc, retain_m2: ',retain_m2
-         write(fates_log(),*) 'Noahs pyc, donate_m2: ',donate_m2
+         ! write(fates_log(),*) 'Noahs pyc, pyc: ',pyc
+         ! write(fates_log(),*) 'Noahs pyc, burned_mass: ',burned_mass
+         ! write(fates_log(),*) 'Noahs pyc, currentPatch%pyrogenic_carbon: ',currentPatch%pyrogenic_carbon
+         ! write(fates_log(),*) 'Noahs pyc, pyc_loss_fac: ',pyc_loss_fac
+         ! write(fates_log(),*) 'Noahs pyc, retain_m2: ',retain_m2
+         ! write(fates_log(),*) 'Noahs pyc, donate_m2: ',donate_m2
 
           new_litt%ag_cwd(c) = new_litt%ag_cwd(c) + donatable_mass*donate_m2
           curr_litt%ag_cwd(c) = curr_litt%ag_cwd(c) + donatable_mass*retain_m2
@@ -1838,6 +1829,8 @@ contains
 
              ! Contribution of dead trees to leaf burn-flux
              burned_mass  = num_dead_trees * (leaf_m+repro_m) * currentCohort%fraction_crown_burned
+             ! pyc = ...
+             ! burned_mass...
 
              do dcmpy=1,ndcmpy
                  dcmpy_frac = GetDecompyFrac(pft,leaf_organ,dcmpy)
