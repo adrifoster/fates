@@ -1,6 +1,6 @@
 program FatesTestGasExchange
   
-  use FatesConstantsMod,           only : r8 => fates_r8
+  use FatesConstantsMod,          only : r8 => fates_r8
   use FATESPlantRespPhotosynthMod, only : GetCanopyGasParameters
   use FatesTestPhotosynthesisMod,  only : CalcVaporPressure
   use FatesConstantsMod,           only : tfrz => t_water_freeze_k_1atm
