@@ -4,7 +4,7 @@ module FatesConstantsMod
   ! this module must have the parameter attribute.
 
   implicit none
-  !private ! Modules are private by default
+  private ! Modules are private by default
 
   ! kinds
   integer, parameter, public :: fates_r8 = selected_real_kind(12) ! 8 byte real
