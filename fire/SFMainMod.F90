@@ -238,13 +238,6 @@ contains
        ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
        currentPatch%fuel%total_loading = currentPatch%fuel%total_loading * (1.0_r8 - SF_val_miner_total) !net of minerals
 
-       ! ----start spreading---
-
-       if ( hlm_masterproc == itrue .and.debug) write(fates_log(),*) &
-            'SF - currentPatch%fuel%bulk_density ',currentPatch%fuel%bulk_density
-       if ( hlm_masterproc == itrue .and.debug) write(fates_log(),*) &
-            'SF - SF_val_part_dens ',SF_val_part_dens
-
        ! beta = packing ratio (unitless)
        ! fraction of fuel array volume occupied by fuel or compactness of fuel bed 
        beta = currentPatch%fuel%bulk_density/SF_val_part_dens
