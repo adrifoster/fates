@@ -216,7 +216,7 @@ end interface
   print *, "Exercising leaf photosynthesis for CO2"
   do i = 1, num_co2
     
-    ! calculate PAR
+    ! calculate co2
     co2_pp(i) = ((min_co2 + co2_inc*(i-1))/1.0E6_r8)*default_can_air_press
     
     do ft = 1, num_pft 
@@ -235,7 +235,7 @@ end interface
   print *, "Exercising leaf photosynthesis for VPD"
   do i = 1, num_RH
     
-    ! calculate PAR
+    ! calculate RH
     RH(i) = min_RH + RH_inc*(i-1)
     
     !if (RH(i) >= 30.0_r8) then 
