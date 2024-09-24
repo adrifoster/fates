@@ -72,6 +72,8 @@ contains
       currentPatch%fire = 0
       currentPatch => currentPatch%older
     end do
+    
+    
 
     if (hlm_spitfire_mode > hlm_sf_nofire_def) then
       call UpdateFireWeather(currentSite, bc_in)
@@ -137,7 +139,10 @@ contains
     wind = bc_in%wind24_pa(iofp)
 
     ! convert to m/min 
-    currentSite%wind = wind*sec_per_min 
+    currentSite%wind = wind*sec_per_min
+    if (hlm_masterproc == itrue) then 
+      write(fates_log(),*) 'wind_in', wind
+    end if 
 
     ! update fire weather index
     call currentSite%fireWeather%UpdateIndex(temp_C, precip, rh, wind)
@@ -158,9 +163,9 @@ contains
     !
     !  DESCRIPTION:
     !  Updates fuel characteristics on each patch of the site
+    !
 
-    use SFParamsMod,       only : SF_val_drying_ratio, SF_val_SAV, SF_val_FBD
-    use FatesConstantsMod, only : nearzero
+    use SFParamsMod, only : SF_val_drying_ratio, SF_val_SAV, SF_val_FBD
 
     ! ARGUMENTS:
     type(ed_site_type), intent(in), target :: currentSite  ! site object
@@ -168,8 +173,7 @@ contains
     ! LOCALS:
     type(fates_patch_type), pointer :: currentPatch ! FATES patch 
     type(litter_type),      pointer :: litter       ! pointer to patch litter class
-    integer                         :: i            ! looping index
-
+    
     currentPatch => currentSite%oldest_patch 
     do while(associated(currentPatch))  
 
@@ -180,47 +184,26 @@ contains
 
         ! update fuel loading [kgC/m2]
         litter => currentPatch%litter(element_pos(carbon12_element))
-        call currentPatch%fuel%CalculateLoading(sum(litter%leaf_fines(:)),           &
-        litter%ag_cwd(1), litter%ag_cwd(2), litter%ag_cwd(3), litter%ag_cwd(4),   &
-        currentPatch%livegrass)
-
+        call currentPatch%fuel%CalculateLoading(sum(litter%leaf_fines(:)),               &
+          litter%ag_cwd(1), litter%ag_cwd(2), litter%ag_cwd(3), litter%ag_cwd(4),        &
+          currentPatch%livegrass)
+            
         ! sum up fuel classes and calculate fractional loading for each
         call currentPatch%fuel%SumLoading()
         call currentPatch%fuel%CalculateFractionalLoading()
-
-        if (currentPatch%fuel%total_loading > 0.0) then        
-
-          ! calculate fuel moisture [m3/m3]
-          call currentPatch%fuel%UpdateFuelMoisture(SF_val_SAV, SF_val_drying_ratio, &
+      
+        ! calculate fuel moisture [m3/m3]
+        call currentPatch%fuel%UpdateFuelMoisture(SF_val_SAV, SF_val_drying_ratio,       &
           currentSite%fireWeather)
-
-          ! calculate geometric properties
-          !call currentPatch%fuel%AverageBulkDensity(SF_val_FBD)
-          !call currentPatch%fuel%AverageSAV(SF_val_SAV)
-
-          currentPatch%fuel%bulk_density = 0.0_r8
-          currentPatch%fuel%SAV = 0.0_r8
-          do i = 1, nfsc               
-            ! average bulk density and SAV across all fuel types except trunks 
-            if (i /= fuel_classes%trunks()) then 
-              currentPatch%fuel%bulk_density = currentPatch%fuel%bulk_density + currentPatch%fuel%frac_loading(i)*SF_val_FBD(i)
-              currentPatch%fuel%SAV = currentPatch%fuel%SAV + currentPatch%fuel%frac_loading(i)*SF_val_SAV(i)
-            end if 
-          end do
-        else
-
-          ! make average sav to avoid crashing code
-          currentPatch%fuel%SAV = sum(SF_val_SAV(1:nfsc))/nfsc 
-
-          ! FIX(SPM,032414) refactor...should not have 0 fuel unless everything is burnt off
-          currentPatch%fuel%bulk_density = 0.0000000001_r8 
-          currentPatch%fuel%frac_loading(:) = 0.0000000001_r8 
-          currentPatch%fuel%total_loading = 0.0000000001_r8
-
-        endif
+        
+        ! calculate geometric properties
+        call currentPatch%fuel%AverageBulkDensity(SF_val_FBD)
+        call currentPatch%fuel%AverageSAV(SF_val_SAV)
+               
       end if 
       currentPatch => currentPatch%younger
-    end do
+      
+    end do 
 
   end subroutine UpdateFuelCharacteristics
 
