@@ -190,7 +190,7 @@ contains
           
         ! calculate fuel moisture [m3/m3]
         call currentPatch%fuel%UpdateFuelMoisture(SF_val_SAV, SF_val_drying_ratio,       &
-          currentSite%fireWeather, MEF_trunks, fuel_moisture_trunks)
+          currentSite%fireWeather)
         
         ! calculate geometric properties
         call currentPatch%fuel%AverageBulkDensity(SF_val_FBD)
