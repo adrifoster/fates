@@ -139,12 +139,9 @@ contains
 
     ! convert to m/min 
     currentSite%wind = wind*sec_per_min
-    if (hlm_masterproc == itrue) then 
-      write(fates_log(),*) 'wind_in', wind
-    end if 
 
     ! update fire weather index
-    call currentSite%fireWeather%UpdateIndex(temp_C, precip, rh, wind)
+    call currentSite%fireWeather%UpdateIndex(temp_C, precip, rh, wind, currentSite%latitude)
 
     ! calculate site-level tree, grass, and bare fraction
     call CalculateTreeGrassAreaSite(currentSite, tree_fraction, grass_fraction, bare_fraction)

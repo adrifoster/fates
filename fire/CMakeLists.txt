@@ -3,6 +3,7 @@ list(APPEND fates_sources
   SFParamsMod.F90
   SFFireWeatherMod.F90
   SFNesterovMod.F90
+  SFCanadianFireWeatherMod.F90
   FatesFuelMod.F90
   FatesFuelClassesMod.F90
   )

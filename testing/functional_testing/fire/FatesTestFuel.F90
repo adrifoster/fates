@@ -8,10 +8,12 @@ program FatesTestFuel
   use SyntheticFuelModels,         only : fuel_models_array_class
   use SFFireWeatherMod,            only : fire_weather
   use SFNesterovMod,               only : nesterov_index
+  use SFCanadianFireWeatherMod,    only : canadian_fire_weather
   use FatesFuelMod,                only : fuel_type
   use FatesFuelClassesMod,         only : nfsc
   use SFParamsMod,                 only : SF_val_SAV, SF_val_drying_ratio
   use SFParamsMod,                 only : SF_val_FBD
+  use FatesInterfaceTypesMod,      only : hlm_current_month
   
   implicit none
   
@@ -40,7 +42,8 @@ program FatesTestFuel
   
   ! CONSTANTS:
   integer,          parameter :: n_days = 365             ! number of days to run simulation
-  character(len=*), parameter :: out_file = 'fuel_out.nc' ! output file 
+  character(len=*), parameter :: out_file = 'fuel_out.nc' ! output file
+  real(r8),         parameter :: latitude = 55.0_r8
   
   ! fuel models to test
   integer, parameter, dimension(3) :: fuel_models = (/102, 183, 164/)
@@ -75,7 +78,7 @@ program FatesTestFuel
   call ReadDatmData(datm_file, temp_degC, precip, rh, wind)
   
   ! set up fire weather class
-  allocate(nesterov_index :: fireWeather)
+  allocate(canadian_fire_weather :: fireWeather)
   call fireWeather%Init()
   
   ! set up fuel objects and calculate loading
@@ -105,7 +108,7 @@ program FatesTestFuel
   
   ! run on time steps
   do i = 1, n_days
-    call fireWeather%UpdateIndex(temp_degC(i), precip(i), rh(i), wind(i))
+    call fireWeather%UpdateIndex(temp_degC(i), precip(i), rh(i), wind(i), latitude)
     NI(i) = fireWeather%fire_weather_index
     
     ! calculate fuel moisture [m3/m3]

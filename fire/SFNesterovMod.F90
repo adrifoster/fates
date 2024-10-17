@@ -38,17 +38,18 @@ module SFNesterovMod
 
     !-------------------------------------------------------------------------------------
 
-    subroutine update_nesterov_index(this, temp_C, precip, rh, wind)
+    subroutine update_nesterov_index(this, temp_C, precip, rh, wind, latitude)
       !
       !  DESCRIPTION:
       !  Updates Nesterov Index
       
       ! ARGUMENTS
-      class(nesterov_index), intent(inout) :: this   ! nesterov index extended class
-      real(r8),              intent(in)    :: temp_C ! daily averaged temperature [degrees C]
-      real(r8),              intent(in)    :: precip ! daily precipitation [mm]
-      real(r8),              intent(in)    :: rh     ! daily relative humidity [%]
-      real(r8),              intent(in)    :: wind   ! daily wind speed [m/min]
+      class(nesterov_index), intent(inout) :: this     ! nesterov index extended class
+      real(r8),              intent(in)    :: temp_C   ! daily averaged temperature [degrees C]
+      real(r8),              intent(in)    :: precip   ! daily precipitation [mm]
+      real(r8),              intent(in)    :: rh       ! daily relative humidity [%]
+      real(r8),              intent(in)    :: wind     ! daily wind speed [m/min]   - not used for this extension
+      real(r8),              intent(in)    :: latitude ! latitude of site [degrees] - not used for this extension
       
       ! LOCALS:
       real(r8) :: t_dew ! dewpoint temperature [degrees C]

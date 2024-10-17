@@ -27,7 +27,7 @@ module SFFireWeatherMod
 
     end subroutine initialize_fire_weather
 
-    subroutine update_fire_weather(this, temp_C, precip, rh, wind)
+    subroutine update_fire_weather(this, temp_C, precip, rh, wind, latitude)
 
       use FatesConstantsMod, only : r8 => fates_r8
 
@@ -38,6 +38,7 @@ module SFFireWeatherMod
       real(r8),            intent(in)    :: precip
       real(r8),            intent(in)    :: rh
       real(r8),            intent(in)    :: wind
+      real(r8),            intent(in)    :: latitude
       
     end subroutine update_fire_weather
     
