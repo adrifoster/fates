@@ -105,8 +105,8 @@ module FatesTestFireMod
     !=====================================================================================
 
     subroutine WriteFireData(out_file, nsteps, nfuelmods, temp_degC, precip, rh, NI,     &
-      loading, frac_loading, fuel_BD, fuel_SAV, total_loading, fuel_moisture,            &
-      fuel_models, carriers)
+      FFMC, DMC, loading, frac_loading, fuel_BD, fuel_SAV, total_loading,                &
+      fuel_moisture_NI, fuel_moisture_CFWI, fuel_models, carriers)
       !
       ! DESCRIPTION:
       ! writes out data from the unit test
@@ -120,10 +120,13 @@ module FatesTestFireMod
       real(r8),           intent(in) :: precip(:)
       real(r8),           intent(in) :: rh(:)
       real(r8),           intent(in) :: NI(:)
+      real(r8),           intent(in) :: FFMC(:)
+      real(r8),           intent(in) :: DMC(:)
       real(r8),           intent(in) :: loading(:,:)
       real(r8),           intent(in) :: frac_loading(:,:)
       real(r8),           intent(in) :: total_loading(:)
-      real(r8),           intent(in) :: fuel_moisture(:,:)
+      real(r8),           intent(in) :: fuel_moisture_NI(:,:)
+      real(r8),           intent(in) :: fuel_moisture_CFWI(:,:)
       real(r8),           intent(in) :: fuel_BD(:)
       real(r8),           intent(in) :: fuel_SAV(:)
       integer,            intent(in) :: fuel_models(:)
@@ -140,10 +143,11 @@ module FatesTestFireMod
       integer              :: modID
       integer              :: tempID, precipID
       integer              :: rhID, NIID, loadingID
+      integer              :: FFMCID, DMCID
       integer              :: frac_loadingID
       integer              :: tot_loadingID
       integer              :: BDID, SAVID
-      integer              :: moistID
+      integer              :: moistNIID, moistCFID
       integer              :: cID
       
       ! create pft indices
@@ -212,11 +216,29 @@ module FatesTestFireMod
         [character(len=150) :: 'time', '', 'Nesterov Index'],        &                                                  
         3, NIID)
         
-      ! register fuel moisture
-      call RegisterVar(ncid, 'fuel_moisture', (/dimIDs(1), dimIDs(3)/), type_double,   &
+      ! register FFMC
+      call RegisterVar(ncid, 'FFMC', dimIDs(1:1), type_double,         &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],   &
+        [character(len=150) :: 'time', '', 'fine fuel moisture code'], &                                                  
+        3, FFMCID)
+    
+      ! register DMC
+      call RegisterVar(ncid, 'DMC', dimIDs(1:1), type_double,         &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],   &
+        [character(len=150) :: 'time', '', 'duff moisture code'], &                                                  
+        3, DMCID)
+        
+      ! register fuel moisture calculated using NI
+      call RegisterVar(ncid, 'fuel_moisture_NI', (/dimIDs(1), dimIDs(3)/), type_double,   &
         [character(len=20)  :: 'coordinates', 'units', 'long_name'],                   &
-        [character(len=150) :: 'time fuel_model', 'm3 m-3', 'average fuel moisture'],  &                                                  
-        3, moistID)
+        [character(len=150) :: 'time fuel_model', 'm3 m-3', 'average fuel moisture calculated using NI'],  &                                                  
+        3, moistNIID)
+          
+      ! register fuel moisture calculated using CF
+      call RegisterVar(ncid, 'fuel_moisture_CFWI', (/dimIDs(1), dimIDs(3)/), type_double,   &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],                   &
+        [character(len=150) :: 'time fuel_model', 'm3 m-3', 'average fuel moisture calculated using Canadian Fire Weather System'],  &                                                  
+        3, moistCFID)
         
       ! register fuel loading
       call RegisterVar(ncid, 'fuel_loading', dimIDs(2:3), type_double,                 &
@@ -260,10 +282,13 @@ module FatesTestFireMod
       call WriteVar(ncid, precipID, precip(:))
       call WriteVar(ncid, rhID, rh(:))
       call WriteVar(ncid, NIID, NI(:))
+      call WriteVar(ncid, FFMCID, FFMC(:))
+      call WriteVar(ncid, DMCID, DMC(:))
       call WriteVar(ncid, loadingID, loading(:,:))
       call WriteVar(ncid, frac_loadingID, frac_loading(:,:))
       call WriteVar(ncid, tot_loadingID, total_loading(:))
-      call WriteVar(ncid, moistiD, fuel_moisture(:,:))
+      call WriteVar(ncid, moistNIID, fuel_moisture_NI(:,:))
+      call WriteVar(ncid, moistCFID, fuel_moisture_CFWI(:,:))
       call WriteVar(ncid, BDID, fuel_BD(:))
       call WriteVar(ncid, SAVID, fuel_SAV(:))
  

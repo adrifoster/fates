@@ -21,7 +21,10 @@ def plot_fuel_dat(run_dir, out_file, save_figs, plot_dir):
     fuel_dat = xr.open_dataset(os.path.join(run_dir, out_file))
     
     plot_NI_dat(fuel_dat, save_figs, plot_dir)
-    plot_moisture_dat(fuel_dat, save_figs, plot_dir)
+    plot_FFMC_dat(fuel_dat, save_figs, plot_dir)
+    plot_DMC_dat(fuel_dat, save_figs, plot_dir)
+    plot_moisture_NI_dat(fuel_dat, save_figs, plot_dir)
+    plot_moisture_CFWI_dat(fuel_dat, save_figs, plot_dir)
     plot_barchart(fuel_dat, 'fuel_loading', 'Fuel loading', 'kgC m$^{-2}$', save_figs, plot_dir)
     plot_barchart(fuel_dat, 'frac_loading', 'Fractional fuel loading', '0-1', save_figs, plot_dir)
     plot_barchart(fuel_dat, 'bulk_density', 'Fuel bulk density', 'kg m$^{-3}$', save_figs, plot_dir, by_litter_type=False)
@@ -75,8 +78,44 @@ def plot_NI_dat(fuel_dat, save_figs, plot_dir):
     if save_figs:
         fig_name = os.path.join(plot_dir, "Nesterov_plot.png")
         plt.savefig(fig_name)
+
+def plot_FFMC_dat(fuel_dat, save_figs, plot_dir):
+    """Plot output for fine fuel moisture code
+
+    Args:
+        fuel_dat (Xarray Dataset): output fuel data
+        save_figs (bool): whether or not to save the figures
+        plot_dir (str): plot directory
+    """
+    
+    plt.figure()
+    fuel_dat.FFMC.plot()
+    plt.xlabel('Time', fontsize=11)
+    plt.ylabel('Fine Fuel Moisture Code', fontsize=11)
+    
+    if save_figs:
+        fig_name = os.path.join(plot_dir, "ffmc_plot.png")
+        plt.savefig(fig_name)
         
-def plot_moisture_dat(fuel_dat, save_figs, plot_dir):
+def plot_DMC_dat(fuel_dat, save_figs, plot_dir):
+    """Plot output for duff moisture code
+
+    Args:
+        fuel_dat (Xarray Dataset): output fuel data
+        save_figs (bool): whether or not to save the figures
+        plot_dir (str): plot directory
+    """
+    
+    plt.figure()
+    fuel_dat.DMC.plot()
+    plt.xlabel('Time', fontsize=11)
+    plt.ylabel('Duff Moisture Code', fontsize=11)
+    
+    if save_figs:
+        fig_name = os.path.join(plot_dir, "dmc_plot.png")
+        plt.savefig(fig_name)        
+        
+def plot_moisture_NI_dat(fuel_dat, save_figs, plot_dir):
     """Plot output for fuel moisture
 
     Args:
@@ -86,10 +125,28 @@ def plot_moisture_dat(fuel_dat, save_figs, plot_dir):
     """
     
     plt.figure()
-    fuel_dat.fuel_moisture.plot(hue='fuel_model')
+    fuel_dat.fuel_moisture_NI.plot(hue='fuel_model')
     plt.xlabel('Time', fontsize=11)
-    plt.ylabel('Fuel Moisture', fontsize=11)
+    plt.ylabel('Fuel Moisture calculated using NI', fontsize=11)
     
     if save_figs:
-        fig_name = os.path.join(plot_dir, "fuel_moisture_plot.png")
+        fig_name = os.path.join(plot_dir, "fuel_moisture_NI_plot.png")
+        plt.savefig(fig_name)
+        
+def plot_moisture_CFWI_dat(fuel_dat, save_figs, plot_dir):
+    """Plot output for fuel moisture
+
+    Args:
+        fuel_dat (Xarray Dataset): output fuel data
+        save_figs (bool): whether or not to save the figures
+        plot_dir (str): plot directory
+    """
+    
+    plt.figure()
+    fuel_dat.fuel_moisture_CFWI.plot(hue='fuel_model')
+    plt.xlabel('Time', fontsize=11)
+    plt.ylabel('Fuel Moisture calculated using CFWI', fontsize=11)
+    
+    if save_figs:
+        fig_name = os.path.join(plot_dir, "fuel_moisture_CFWI_plot.png")
         plt.savefig(fig_name)

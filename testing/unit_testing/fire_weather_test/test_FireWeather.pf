@@ -36,14 +36,14 @@ module test_FireWeather
     @Test 
     subroutine UpdateIndex_OverPrecipThreshold_ZerosNI(this)
       ! test that over 3 mm of rain is 0.0
-      class(TestFireWeather), intent(inout) :: this            ! fire weather test object
-      real(r8)                              :: tempC = 25.0_r8 ! temperature [degC]
-      real(r8)                              :: precip = 3.1_r8 ! precipitation [mm]
-      real(r8)                              :: rh = 10.0_r8    ! relative humidity [%]
-      real(r8)                              :: wind = 0.0_r8   ! wind speed [m/s]
+      class(TestFireWeather), intent(inout) :: this               ! fire weather test object
+      real(r8)                              :: tempC = 25.0_r8    ! temperature [degC]
+      real(r8)                              :: precip = 3.1_r8    ! precipitation [mm]
+      real(r8)                              :: rh = 10.0_r8       ! relative humidity [%]
+      real(r8)                              :: wind = 0.0_r8      ! wind speed [m/s]
+      real(r8)                              :: latitude = 55.0_r8 ! latitude [degrees]
 
-
-      call this%fireWeatherNesterov%UpdateIndex(tempC, precip, rh, wind)
+      call this%fireWeatherNesterov%UpdateIndex(tempC, precip, rh, wind, latitude)
 
       @assertEqual(this%fireWeatherNesterov%fire_weather_index, 0.0_r8, tolerance=tol)
 
@@ -53,12 +53,13 @@ module test_FireWeather
     subroutine UpdateIndex_AtPrecipThreshold_AccumulateNI(this)
       ! test that at 3 mm is over 0.0
       class(TestFireWeather), intent(inout) :: this ! fire weather test object
-      real(r8)                              :: tempC = 25.0_r8 ! temperature [degC]
-      real(r8)                              :: precip = 3.0_r8 ! precipitation [mm]
-      real(r8)                              :: rh = 10.0_r8    ! relative humidity [%]
-      real(r8)                              :: wind = 0.0_r8   ! wind speed [m/s]
+      real(r8)                              :: tempC = 25.0_r8    ! temperature [degC]
+      real(r8)                              :: precip = 3.0_r8    ! precipitation [mm]
+      real(r8)                              :: rh = 10.0_r8       ! relative humidity [%]
+      real(r8)                              :: wind = 0.0_r8      ! wind speed [m/s]
+      real(r8)                              :: latitude = 55.0_r8 ! latitude [degrees]
 
-      call this%fireWeatherNesterov%UpdateIndex(tempC, precip, rh, wind)
+      call this%fireWeatherNesterov%UpdateIndex(tempC, precip, rh, wind, latitude)
 
       @assertGreaterThan(this%fireWeatherNesterov%fire_weather_index, 0.0_r8, tolerance=tol)
 
@@ -68,13 +69,13 @@ module test_FireWeather
     subroutine UpdateIndex_NegativeCalculation_ZerosNI(this)
       ! test that NI is not negative
       class(TestFireWeather), intent(inout) :: this ! fire weather test object
-      real(r8)                              :: tempC = -30.0_r8 ! temperature [degC]
-      real(r8)                              :: precip = 0.0_r8  ! precipitation [mm]
-      real(r8)                              :: rh = 99.0_r8     ! relative humidity [%]
-      real(r8)                              :: wind = 0.0_r8    ! wind speed [m/s]
+      real(r8)                              :: tempC = -30.0_r8   ! temperature [degC]
+      real(r8)                              :: precip = 0.0_r8    ! precipitation [mm]
+      real(r8)                              :: rh = 99.0_r8       ! relative humidity [%]
+      real(r8)                              :: wind = 0.0_r8      ! wind speed [m/s]
+      real(r8)                              :: latitude = 55.0_r8 ! latitude [degrees]
       
-
-      call this%fireWeatherNesterov%UpdateIndex(tempC, precip, rh, wind)
+      call this%fireWeatherNesterov%UpdateIndex(tempC, precip, rh, wind, latitude)
 
       @assertEqual(this%fireWeatherNesterov%fire_weather_index, 0.0_r8, tolerance=tol)
 

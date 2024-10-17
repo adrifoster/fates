@@ -1,13 +1,14 @@
 module FatesFuelMod
 
-  use FatesFuelClassesMod, only : nfsc, fuel_classes
-  use FatesConstantsMod,   only : r8 => fates_r8
-  use FatesConstantsMod,   only : nearzero
-  use SFNesterovMod,       only : nesterov_index
-  use SFFireWeatherMod,    only : fire_weather
-  use FatesGlobals,        only : fates_log
-  use FatesGlobals,        only : endrun => fates_endrun
-  use shr_log_mod,         only : errMsg => shr_log_errMsg
+  use FatesFuelClassesMod,      only : nfsc, fuel_classes
+  use FatesConstantsMod,        only : r8 => fates_r8
+  use FatesConstantsMod,        only : nearzero
+  use SFNesterovMod,            only : nesterov_index
+  use SFCanadianFireWeatherMod, only : canadian_fire_weather
+  use SFFireWeatherMod,         only : fire_weather
+  use FatesGlobals,             only : fates_log
+  use FatesGlobals,             only : endrun => fates_endrun
+  use shr_log_mod,              only : errMsg => shr_log_errMsg
 
   implicit none
   private
@@ -200,6 +201,9 @@ module FatesFuelMod
           class is (nesterov_index)
             call CalculateFuelMoistureNesterov(sav_fuel, drying_ratio,                   &
               fireWeatherClass%fire_weather_index, moisture)
+          class is (canadian_fire_weather)
+            call CalculateFuelMoistureCFWI(sav_fuel, fireWeatherClass%ffmc,              &
+              fireWeatherClass%dmc, moisture)
           class default 
             write(fates_log(), *) 'Unknown fire weather class selected.'
             write(fates_log(), *) 'Choose a different fire weather class or upate this subroutine.'
@@ -258,6 +262,47 @@ module FatesFuelMod
       end do
       
     end subroutine CalculateFuelMoistureNesterov
+    
+    !-------------------------------------------------------------------------------------
+    
+    subroutine CalculateFuelMoistureCFWI(sav_fuel, ffmc, dmc, moisture)
+      !
+      ! DESCRIPTION:
+      !   Updates fuel moisture
+
+      ! ARGUMENTS:
+      real(r8), intent(in)  :: sav_fuel(nfsc) ! surface area to volume ratio of all fuel types [/cm]
+      real(r8), intent(in)  :: ffmc           ! fine fuel moisture code
+      real(r8), intent(in)  :: dmc            ! duff moisture code
+      real(r8), intent(out) :: moisture(nfsc) ! moisture of litter [m3/m3]
+      
+      ! LOCALS
+      integer  :: i         ! looping index
+      real(r8) :: alpha_FMC ! intermediate variable for calculating fuel moisture
+      
+      ! CONSTANTS:
+      real(r8) :: drying_rat = 2.0_r8
+    
+      do i = 1, nfsc
+        if (i == fuel_classes%live_grass()) then 
+          ! live grass moisture is a function of SAV and changes via drying index
+          ! along the same relationship as the 1 hour fuels
+          ! live grass has same SAV as dead grass, but retains more moisture with this calculation
+          alpha_FMC = exp(-1.0_r8*(sav_fuel(fuel_classes%twigs())/drying_rat))
+        else
+          alpha_FMC = exp(-1.0_r8*(sav_fuel(i)/drying_rat))
+        end if
+        
+        if (i == fuel_classes%trunks() .or. i == fuel_classes%large_branches()) then
+          ! use duff moisture code for trunks and large branches
+          moisture(i) = (20.0_r8 + 100.0_r8/exp(0.023_r8*dmc))/100.0_r8 !*alpha_FMC
+        else
+          ! use fine fuel moisture code for everything else
+          moisture(i) = (147.2_r8*(101.0_r8 - ffmc))/(59.5_r8 + ffmc)/100.0_r8 !*alpha_FMC
+        end if 
+      end do
+      
+    end subroutine CalculateFuelMoistureCFWI
     
     !-------------------------------------------------------------------------------------
     

@@ -13,13 +13,15 @@ module SFCanadianFireWeatherMod
 
   type, public, extends(fire_weather) :: canadian_fire_weather
   
-    real(r8) :: dmc ! duff moisture code
+    real(r8) :: dmc  ! duff moisture code
+    real(r8) :: ffmc ! fine fuel moisture code
 
     contains 
 
       procedure, public :: Init => init_canadian_fire_weather
       procedure, public :: UpdateIndex => update_cfw_index
       procedure, public :: update_dmc
+      procedure, public :: update_ffmc
             
   end type canadian_fire_weather
 
@@ -37,6 +39,7 @@ module SFCanadianFireWeatherMod
       this%fire_weather_index   = 0.0_r8
       this%effective_windspeed  = 0.0_r8
       this%dmc                  = 6.0_r8
+      this%ffmc                 = 85.0_r8
 
     end subroutine init_canadian_fire_weather
 
@@ -56,117 +59,230 @@ module SFCanadianFireWeatherMod
       real(r8),                     intent(in)    :: latitude ! latitude of site [degress]
       
       call this%update_dmc(temp_C, rh, precip, hlm_current_month, latitude)
+      call this%update_ffmc(temp_C, rh, wind, precip)
+      
+      this%fire_weather_index = this%ffmc
 
     end subroutine update_cfw_index
 
     !-------------------------------------------------------------------------------------
     
     subroutine update_dmc(this, temp_C, rh, precip, month, latitude)
-        !
-        !  DESCRIPTION:
-        !  Calculates the Canadian Forest Fire Rating System (CFRS) duff moisture code (dmc)
-        !
-        !  Adapted from Wang 2015 NRC Information Report NOR-X-424
-        !
-        ! ARGUMENTS:
-        class(canadian_fire_weather), intent(inout) :: this      ! canadian index extended class
-        real(r8),                     intent(in)    :: temp_C    ! daily average air temperature [degC]
-        real(r8),                     intent(in)    :: rh        ! daily average relative humidity (%)
-        real(r8),                     intent(in)    :: precip    ! precipitation over last 24 hrs [mm]
-        real(r8),                     intent(in)    :: latitude  ! site latitude [degrees]
-        integer,                      intent(in)    :: month     ! month of simulation
-  
-        ! LOCALS
-        real(r8), dimension(12) :: day_length_adj    ! day length adjustment
-        real(r8)                :: rw                ! net rainfall (mm)
-        real(r8)                :: b                 ! temporary variable to calculate moisture content after rain
-        real(r8)                :: temp_constrained  ! corrected temperature (degC)
-        real(r8)                :: wmi               ! previous day's duff moisture (%)
-        real(r8)                :: wmr               ! moisture content after rain (%)
-        real(r8)                :: pr                ! corrected rainfall (mm)
-        real(r8)                :: rk                ! log drying rate
-        real(r8)                :: previous_dmc      ! previous day's dmc
+      !
+      !  DESCRIPTION:
+      !  Calculates the Canadian Forest Fire Rating System (CFRS) duff moisture code (dmc)
+      !
+      !  Adapted from Wang 2015 NRC Information Report NOR-X-424
+      !
+      ! ARGUMENTS:
+      class(canadian_fire_weather), intent(inout) :: this     ! canadian index extended class
+      real(r8),                     intent(in)    :: temp_C   ! daily average air temperature [degC]
+      real(r8),                     intent(in)    :: rh       ! daily average relative humidity [%]
+      real(r8),                     intent(in)    :: precip   ! precipitation over last 24 hrs [mm]
+      real(r8),                     intent(in)    :: latitude ! site latitude [degrees]
+      integer,                      intent(in)    :: month    ! month of simulation
 
-        ! CONSTANTS:
+      ! LOCALS
+      real(r8), dimension(12) :: day_length_adj    ! day length adjustment
+      real(r8)                :: rw                ! net rainfall [mm]
+      real(r8)                :: b                 ! temporary variable to calculate moisture content after rain
+      real(r8)                :: temp_constrained  ! corrected temperature [degC]
+      real(r8)                :: wmi               ! previous day's duff moisture [%]
+      real(r8)                :: wmr               ! moisture content after rain [%]
+      real(r8)                :: pr                ! corrected rainfall [mm]
+      real(r8)                :: rk                ! log drying rate
+      real(r8)                :: previous_dmc      ! previous day's dmc
 
-        ! Day length adjustments
-        ! For latitude near equator (-10, 10 degrees), use a factor of 9.0 for all months
+      ! CONSTANTS:
+
+      ! Day length adjustments
+      ! For latitude near equator (-10, 10 degrees), use a factor of 9.0 for all months
+      
+      ! latititude >= 30 N
+      real(r8), dimension(12), parameter :: ELL01 = [6.5_r8, 7.5_r8, 9.0_r8, 12.8_r8,  &
+        13.9_r8, 13.9_r8, 12.4_r8, 10.9_r8, 9.4_r8, 8.0_r8, 7.0_r8, 6.0_r8]
         
-        ! latititude >= 30 N
-        real(r8), dimension(12), parameter :: ELL01 = [6.5_r8, 7.5_r8, 9.0_r8, 12.8_r8,  &
-          13.9_r8, 13.9_r8, 12.4_r8, 10.9_r8, 9.4_r8, 8.0_r8, 7.0_r8, 6.0_r8]
-          
-        ! 30 > latitude >= 10
-        real(r8), dimension(12), parameter :: ELL02 = [7.9_r8, 8.4_r8, 8.9_r8, 9.5_r8,   &
-          9.9_r8, 10.2_r8, 10.1_r8, 9.7_r8, 9.1_r8, 8.6_r8, 8.1_r8, 7.8_r8] 
+      ! 30 > latitude >= 10
+      real(r8), dimension(12), parameter :: ELL02 = [7.9_r8, 8.4_r8, 8.9_r8, 9.5_r8,   &
+        9.9_r8, 10.2_r8, 10.1_r8, 9.7_r8, 9.1_r8, 8.6_r8, 8.1_r8, 7.8_r8] 
+      
+      ! -10 > latitude >= -30
+      real(r8), dimension(12), parameter :: ELL03 = [10.1_r8, 9.6_r8, 9.1_r8, 8.5_r8,  &
+        8.1_r8, 7.8_r8, 7.9_r8, 8.3_r8, 8.9_r8, 9.4_r8, 9.9_r8, 10.2_r8]
+      
+      ! latitude < -30
+      real(r8), dimension(12), parameter :: ELL04 = [11.5_r8, 10.5_r8, 9.2_r8, 7.9_r8, 6.8_r8,  &
+        6.2_r8, 6.5_r8, 7.4_r8, 8.7_r8, 10.0_r8, 11.2_r8, 11.8_r8]
         
-        ! -10 > latitude >= -30
-        real(r8), dimension(12), parameter :: ELL03 = [10.1_r8, 9.6_r8, 9.1_r8, 8.5_r8,  &
-          8.1_r8, 7.8_r8, 7.9_r8, 8.3_r8, 8.9_r8, 9.4_r8, 9.9_r8, 10.2_r8]
-        
-        ! latitude < -30
-        real(r8), dimension(12), parameter :: ELL04 = [11.5_r8, 10.5_r8, 9.2_r8, 7.9_r8, 6.8_r8,  &
-          6.2_r8, 6.5_r8, 7.4_r8, 8.7_r8, 10.0_r8, 11.2_r8, 11.8_r8]
-          
-        ! save previous day's value of dmc
-        previous_dmc = this%dmc
+      ! save previous day's value of dmc
+      previous_dmc = this%dmc
 
-        ! constrain low end of temperature
-        if (temp_C < -1.1_r8) then
-            temp_constrained = -1.1_r8
-        else
-            temp_constrained = temp_C
-        end if
+      ! constrain low end of temperature
+      if (temp_C < -1.1_r8) then
+        temp_constrained = -1.1_r8
+      else
+        temp_constrained = temp_C
+      end if
 
-        ! determine day length adjustment based on latitude
-        if (latitude > 30.0_r8) then
-            day_length_adj = ELL01
-        else if (latitude <= 30.0_r8 .and. latitude > 10.0_r8) then
-            day_length_adj = ELL02
-        else if (latitude <= 10.0_r8 .and. latitude > -10.0_r8) then
-            day_length_adj = 9.0_r8
-        else if (latitude <= -10.0_r8 .and. latitude > -30.0_r8) then
-            day_length_adj = ELL03
-        else if (latitude <= -30.0_r8) then
-            day_length_adj = ELL04
-        end if
+      ! determine day length adjustment based on latitude
+      if (latitude > 30.0_r8) then
+        day_length_adj = ELL01
+      else if (latitude <= 30.0_r8 .and. latitude > 10.0_r8) then
+        day_length_adj = ELL02
+      else if (latitude <= 10.0_r8 .and. latitude > -10.0_r8) then
+        day_length_adj = 9.0_r8
+      else if (latitude <= -10.0_r8 .and. latitude > -30.0_r8) then
+        day_length_adj = ELL03
+      else if (latitude <= -30.0_r8) then
+        day_length_adj = ELL04
+      end if
 
-        ! Log drying rate
-        rk = 1.894_r8*(temp_constrained + 1.1_r8)*(100.0_r8 - rh)*(day_length_adj(month)*0.0001_r8)
+      ! Log drying rate
+      rk = 1.894_r8*(temp_constrained + 1.1_r8)*(100.0_r8 - rh)*(day_length_adj(month)*0.0001_r8)
 
-        ! net rainfall (mm)
-        rw = 0.92_r8*precip - 1.27_r8
+      ! net rainfall (mm)
+      rw = 0.92_r8*precip - 1.27_r8
 
-        ! Alteration to Eq. 12 to calculate more accurately
-        wmi = 20.0_r8 + 280.0_r8/exp(0.023_r8*previous_dmc)
+      ! Alteration to Eq. 12 to calculate more accurately
+      wmi = 20.0_r8 + 280.0_r8/exp(0.023_r8*previous_dmc)
 
-        ! Eqs 13a-c
-        if (previous_dmc <= 33.0_r8) then
-            b = 100.0_r8/(0.5_r8 + 0.3_r8*previous_dmc)
-        else if (previous_dmc > 33.0_r8 .and. previous_dmc <= 65.0_r8) then
-            b = 14.0_r8 - 1.3_r8*log(previous_dmc)
-        else
-            b = 6.2_r8*log(previous_dmc) - 17.2_r8
-        end if
+      ! Eqs 13a-c
+      if (previous_dmc <= 33.0_r8) then
+        b = 100.0_r8/(0.5_r8 + 0.3_r8*previous_dmc)
+      else if (previous_dmc > 33.0_r8 .and. previous_dmc <= 65.0_r8) then
+        b = 14.0_r8 - 1.3_r8*log(previous_dmc)
+      else
+        b = 6.2_r8*log(previous_dmc) - 17.2_r8
+      end if
 
-        ! Moisture content after rain
-        wmr = wmi + 1000.0_r8*rw/(48.77_r8 + b*rw)
+      ! Moisture content after rain
+      wmr = wmi + 1000.0_r8*rw/(48.77_r8 + b*rw)
 
-        ! Constrain p
-        if (precip <= 1.5_r8) then
-            pr = previous_dmc
-        else
-            pr = 43.43_r8*(5.6348_r8 - log(wmr - 20.0_r8))
-        end if
+      ! Constrain p
+      if (precip <= 1.5_r8) then
+        pr = previous_dmc
+      else
+        pr = 43.43_r8*(5.6348_r8 - log(wmr - 20.0_r8))
+      end if
 
-        if (pr < 0.0_r8) pr = 0.0_r8
+      if (pr < 0.0_r8) pr = 0.0_r8
 
-        ! Calculate dmc
-        this%dmc = pr + rk
-        if (this%dmc < nearzero) this%dmc = 0.0_r8
+      ! Calculate dmc
+      this%dmc = pr + rk
+      if (this%dmc < nearzero) this%dmc = 0.0_r8
 
     end subroutine update_dmc
     
+    !-------------------------------------------------------------------------------------
+    
+    subroutine update_ffmc(this, temp_C, rh, wind, precip)
+      !
+      !  DESCRIPTION:
+      !  Calculates the daily Canadian Forest Fire Rating System (CFRS) fine
+      !  fuel moisture code (ffmc).
+      !
+      !  Adapted from Wang 2015 NRC Information Report NOR-X-424
+      !
+      
+      use FatesConstantsMod, only : m_per_km, sec_per_min, min_per_hr
+
+      ! ARGUMENTS:
+      class(canadian_fire_weather), intent(inout) :: this ! canadian index extended class
+      real(r8),                     intent(in)  :: temp_C ! mean daily air temperature [degC]
+      real(r8),                     intent(in)  :: RH     ! mean daily relative humidity [%]
+      real(r8),                     intent(in)  :: wind   ! mean wind speed [m/s]
+      real(r8),                     intent(in)  :: precip ! precipitation over last 24 hrs [mm]
+      
+      ! LOCALS:
+      real(r8) :: wind_kmhr   ! wind speed [km/hr]
+      real(r8) :: wmo         ! previous day's fine fuel moisture [%]
+      real(r8) :: ra          ! effective rainfall [mm]
+      real(r8) :: ed          ! equilibrium moisture content from drying [%]
+      real(r8) :: ew          ! equilibrium moisture content from wetting [%]
+      real(r8) :: z           ! log drying/wetting rate at 21.1 degC
+      real(r8) :: x           ! actual drying/wetting rate
+      real(r8) :: wm          ! fine fuel moisture [%]
+      real(r8) :: ffmc_prev   ! previous day's ffmc
+      
+      ! save previous day's ffmc
+      ffmc_prev = this%ffmc
+
+      ! convert wind [m/s] to [km/hr]  
+      wind_kmhr = wind/m_per_km*sec_per_min*min_per_hr
+
+      ! fine fuel moisture content from previous day
+      wmo = (147.2_r8*(101.0_r8 - ffmc_prev))/(59.5_r8 + ffmc_prev)
+
+      ! rain reduction to allow for loss in overhead canopy
+      if (precip > 0.5_r8) then
+        ra = precip - 0.5_r8
+      else
+        ra = 0.5_r8
+      end if
+
+      ! moisture content from wetting
+      if (precip > 0.5_r8) then
+        if (wmo > 150.0_r8) then
+          wmo = wmo + 0.0015_r8*(wmo - 150.0_r8)*(wmo - 150.0_r8)*                       &
+            sqrt(ra) + 42.5_r8*ra*exp(-100.0_r8/(251.0_r8 - wmo))*                       &
+            (1.0_r8 - exp(-6.93_r8/ra))
+        else
+          wmo = wmo + 42.5_r8*ra*exp(-100.0_r8/(251.0_r8 - wmo))*                        &
+            (1.0_r8 - exp(-6.93_r8)/ra)
+        end if
+      end if
+
+      ! cap wmo at 250%
+      if (wmo > 250.0_r8) wmo = 250.0_r8
+
+      ! equilibrium moisture content from drying
+      ed = 0.942_r8*(rh**0.679_r8) + (11.0_r8*exp((rh - 100.0_r8)/10.0_r8)) + 0.18_r8*   &
+        (21.1_r8 - temp_C)*(1.0_r8 - 1.0_r8/exp(rh*0.115_r8))
+
+      ! equilibrium moisture content from wetting
+      ew = 0.618_r8*(rh**0.753_r8) + (10.0_r8*exp((rh - 100.0_r8)/10.0_r8)) + 0.18_r8*   &
+        (21.1_r8 - temp_C)*(1.0_r8 - 1.0_r8/exp(rh*0.115_r8))
+
+      ! log drying rate at normal temperature (21.1degC)
+      if (wmo < ed .and. wmo < ew) then
+        z = 0.424_r8*(1.0_r8 - (((100.0_r8 - rh)/100.0_r8)**1.7_r8)) +                   &
+          0.0694_r8*sqrt(wind_kmhr)*(1.0_r8 - ((100.0_r8 - rh)/100.0_r8)**8.0_r8)
+      else
+        z = 0.0_r8
+      end if
+
+      ! effect of temperature on drying rate
+      x = z*0.581_r8*exp(0.0365_r8*temp_C)
+
+      ! calculate moisture
+      if (wmo < ed .and. wmo < ew) then
+        wm = ew - (ew - wmo)/(10.0_r8**x)
+      else
+        wm = wmo
+      end if
+
+      ! log of wetting rate at normal temperature of 21.1degC
+      if (wmo > ed) then
+        z = 0.424_r8*(1.0_r8 - (rh/100.0_r8)**1.7_r8) + 0.0694_r8*sqrt(wind_kmhr)*       &
+          (1.0_r8 - (rh/100.0_r8)**8.0_r8)
+      end if
+
+      ! effect of temperature on  wetting rate
+      x = z*0.581_r8*exp(0.0365_r8*temp_C)
+
+      ! calculate moisture
+      if (wmo > ed) then
+        wm = ed + (wmo - ed)/(10.0_r8**x)
+      end if
+
+      ! calculate ffmc and correct for outside bounds
+      this%ffmc = (59.5_r8*(250.0_r8 - wm))/(147.2_r8 + wm)
+
+      if (this%ffmc > 101.0_r8) this%ffmc = 101.0_r8
+      if (this%ffmc <= 0.0_r8) this%ffmc = 0.0_r8
+
+    end subroutine update_ffmc
+
     !-------------------------------------------------------------------------------------
 
 end module SFCanadianFireWeatherMod

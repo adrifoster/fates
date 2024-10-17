@@ -230,6 +230,9 @@ integer, parameter, public :: isemi_stress_decid = 2 ! If the PFT is stress (dro
   ! Conversion factor: millimeters per centimeter (ahb added this 7/7/2021)
   real(fates_r8), parameter, public :: mm_per_cm = 10.0_fates_r8
   
+  ! Conversion factor: meters per kilometer
+  real(fates_r8), parameter, public :: m_per_km = 1000.0_fates_r8
+  
   ! Conversion factor: meters per centimeter
   real(fates_r8), parameter, public :: m_per_cm = 1.0E-2_fates_r8
 
@@ -255,6 +258,9 @@ integer, parameter, public :: isemi_stress_decid = 2 ! If the PFT is stress (dro
 
   ! Conversion: seconds per minute
   real(fates_r8), parameter, public :: sec_per_min = 60.0_fates_r8
+  
+  ! Conversion: minutes per hour
+  real(fates_r8), parameter, public :: min_per_hr = 60.0_fates_r8
 
   ! Conversion: seconds per day
   real(fates_r8), parameter, public :: sec_per_day = 86400.0_fates_r8
