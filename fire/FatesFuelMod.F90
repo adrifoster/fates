@@ -179,7 +179,7 @@ module FatesFuelMod
 
     !-------------------------------------------------------------------------------------
     
-    subroutine UpdateFuelMoisture(this, sav_fuel, drying_ratio, fireWeatherClass)
+    subroutine UpdateFuelMoisture(this, sav_fuel, drying_ratio, fireWeatherClass, MEF_trunks, moisture_trunks)
       ! DESCRIPTION:
       !   Updates fuel moisture depending on what fire weather class is in use
       
@@ -188,12 +188,14 @@ module FatesFuelMod
       real(r8),            intent(in)    :: sav_fuel(nfsc)   ! surface area to volume ratio of all fuel types [/cm]
       real(r8),            intent(in)    :: drying_ratio     ! drying ratio
       class(fire_weather), intent(in)    :: fireWeatherClass ! fireWeatherClass
+      real(r8),            intent(out)    :: MEF_trunks     ! drying ratio
+      real(r8),            intent(out)    :: moisture_trunks     ! drying ratio
       
       real(r8) :: moisture(nfsc)               ! fuel moisture [m3/m3]
       real(r8) :: moisture_of_extinction(nfsc) ! fuel moisture of extinction [m3/m3]
       integer  :: i                            ! looping index
  
-      if (this%total_loading > nearzero) then 
+      if (this%total_loading + this%loading(fuel_classes%trunks()) > nearzero) then 
         ! calculate fuel moisture [m3/m3] for each fuel class depending on what
         ! fire weather class is in use
         select type (fireWeatherClass)
@@ -219,13 +221,15 @@ module FatesFuelMod
             this%MEF = this%MEF + this%frac_loading(i)*moisture_of_extinction(i)
           end if 
         end do
+        MEF_trunks = moisture_of_extinction(fuel_classes%trunks())
+        moisture_trunks = moisture(fuel_classes%trunks())
                 
       else 
         this%effective_moisture(1:nfsc) = 0.0_r8
         this%average_moisture = 0.0_r8
         this%MEF = 0.0_r8
       end if
-       
+      
     end subroutine UpdateFuelMoisture
     
     !-------------------------------------------------------------------------------------
@@ -296,7 +300,7 @@ module FatesFuelMod
       real(r8), parameter :: MEF_a = 0.524_r8
       real(r8), parameter :: MEF_b = 0.066_r8
       
-      if (sav <= nearzero) then
+      if (sav <= 0.0_r8) then
         MoistureOfExtinction = 0.0_r8
       else
         MoistureOfExtinction = MEF_a - MEF_b*log(sav)

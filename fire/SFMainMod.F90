@@ -7,8 +7,8 @@ module SFMainMod
 
   use FatesConstantsMod,      only : r8 => fates_r8
   use FatesConstantsMod,      only : itrue, ifalse
-  use FatesConstantsMod,      only : pi_const, nearzero
-  use FatesConstantsMod,      only : nocomp_bareground
+  use FatesConstantsMod,      only : pi_const
+  use FatesConstantsMod,      only : nocomp_bareground, nearzero
   use FatesGlobals,           only : fates_log
   use FatesInterfaceTypesMod, only : hlm_masterproc 
   use FatesInterfaceTypesMod, only : hlm_spitfire_mode
@@ -73,8 +73,6 @@ contains
       currentPatch => currentPatch%older
     end do
     
-    
-
     if (hlm_spitfire_mode > hlm_sf_nofire_def) then
       call UpdateFireWeather(currentSite, bc_in)
       call UpdateFuelCharacteristics(currentSite)
@@ -173,6 +171,7 @@ contains
     ! LOCALS:
     type(fates_patch_type), pointer :: currentPatch ! FATES patch 
     type(litter_type),      pointer :: litter       ! pointer to patch litter class
+    real(r8) :: MEF_trunks, fuel_moisture_trunks
     
     currentPatch => currentSite%oldest_patch 
     do while(associated(currentPatch))  
@@ -191,18 +190,17 @@ contains
         ! sum up fuel classes and calculate fractional loading for each
         call currentPatch%fuel%SumLoading()
         call currentPatch%fuel%CalculateFractionalLoading()
-      
+          
         ! calculate fuel moisture [m3/m3]
         call currentPatch%fuel%UpdateFuelMoisture(SF_val_SAV, SF_val_drying_ratio,       &
-          currentSite%fireWeather)
+          currentSite%fireWeather, MEF_trunks, fuel_moisture_trunks)
         
         ! calculate geometric properties
         call currentPatch%fuel%AverageBulkDensity(SF_val_FBD)
         call currentPatch%fuel%AverageSAV(SF_val_SAV)
-               
+            
       end if 
       currentPatch => currentPatch%younger
-      
     end do 
 
   end subroutine UpdateFuelCharacteristics
@@ -454,7 +452,10 @@ contains
     currentPatch => currentSite%oldest_patch
     do while(associated(currentPatch))
 
-      if (currentPatch%nocomp_pft_label /= nocomp_bareground) then
+      if (currentPatch%nocomp_pft_label =/ nocomp_bareground .and. currentPatch%fuel%total_loading > nearzero) then
+                       
+        ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
+        currentPatch%fuel%total_loading = currentPatch%fuel%total_loading * (1.0_r8 - SF_val_miner_total) !net of minerals
 
         ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
         currentPatch%fuel%total_loading = currentPatch%fuel%total_loading*               &
