@@ -195,45 +195,45 @@ module SFCanadianFireWeatherMod
       
       ! LOCALS:
       real(r8) :: wind_kmhr   ! wind speed [km/hr]
-      real(r8) :: wmo         ! previous day's fine fuel moisture [%]
-      real(r8) :: ra          ! effective rainfall [mm]
+      real(r8) :: moist_prev  ! previous day's fine fuel moisture [%]
+      real(r8) :: precip_eff  ! effective precipitation [mm]
       real(r8) :: ed          ! equilibrium moisture content from drying [%]
       real(r8) :: ew          ! equilibrium moisture content from wetting [%]
       real(r8) :: z           ! log drying/wetting rate at 21.1 degC
       real(r8) :: x           ! actual drying/wetting rate
-      real(r8) :: wm          ! fine fuel moisture [%]
+      real(r8) :: moist       ! fine fuel moisture [%]
       real(r8) :: ffmc_prev   ! previous day's ffmc
       
       ! save previous day's ffmc
       ffmc_prev = this%ffmc
+       
+      ! fine fuel moisture content from previous day
+      moist_prev = (147.2_r8*(101.0_r8 - ffmc_prev))/(59.5_r8 + ffmc_prev)
 
       ! convert wind [m/s] to [km/hr]  
       wind_kmhr = wind/m_per_km*sec_per_min*min_per_hr
 
-      ! fine fuel moisture content from previous day
-      wmo = (147.2_r8*(101.0_r8 - ffmc_prev))/(59.5_r8 + ffmc_prev)
-
       ! rain reduction to allow for loss in overhead canopy
       if (precip > 0.5_r8) then
-        ra = precip - 0.5_r8
+        precip_eff = precip - 0.5_r8
       else
-        ra = 0.5_r8
+        precip_eff = 0.5_r8
       end if
 
-      ! moisture content from wetting
+      ! moisture content from wetting if precipitation is high enough
       if (precip > 0.5_r8) then
-        if (wmo > 150.0_r8) then
-          wmo = wmo + 0.0015_r8*(wmo - 150.0_r8)*(wmo - 150.0_r8)*                       &
-            sqrt(ra) + 42.5_r8*ra*exp(-100.0_r8/(251.0_r8 - wmo))*                       &
-            (1.0_r8 - exp(-6.93_r8/ra))
+        if (moist_prev > 150.0_r8) then
+          moist = moist_prev + 0.0015_r8*(moist_prev - 150.0_r8)*(moist_prev - 150.0_r8)*                       &
+            sqrt(precip_eff) + 42.5_r8*precip_eff*exp(-100.0_r8/(251.0_r8 - moist_prev))*                       &
+            (1.0_r8 - exp(-6.93_r8/precip_eff))
         else
-          wmo = wmo + 42.5_r8*ra*exp(-100.0_r8/(251.0_r8 - wmo))*                        &
-            (1.0_r8 - exp(-6.93_r8)/ra)
+          moist = moist_prev + 42.5_r8*precip_eff*exp(-100.0_r8/(251.0_r8 - moist_prev))*                        &
+            (1.0_r8 - exp(-6.93_r8)/precip_eff)
         end if
       end if
 
       ! cap wmo at 250%
-      if (wmo > 250.0_r8) wmo = 250.0_r8
+      if (moist > 250.0_r8) moist = 250.0_r8
 
       ! equilibrium moisture content from drying
       ed = 0.942_r8*(rh**0.679_r8) + (11.0_r8*exp((rh - 100.0_r8)/10.0_r8)) + 0.18_r8*   &
@@ -244,7 +244,7 @@ module SFCanadianFireWeatherMod
         (21.1_r8 - temp_C)*(1.0_r8 - 1.0_r8/exp(rh*0.115_r8))
 
       ! log drying rate at normal temperature (21.1degC)
-      if (wmo < ed .and. wmo < ew) then
+      if (moist_prev < ed .and. moist_prev < ew) then
         z = 0.424_r8*(1.0_r8 - (((100.0_r8 - rh)/100.0_r8)**1.7_r8)) +                   &
           0.0694_r8*sqrt(wind_kmhr)*(1.0_r8 - ((100.0_r8 - rh)/100.0_r8)**8.0_r8)
       else
@@ -255,14 +255,14 @@ module SFCanadianFireWeatherMod
       x = z*0.581_r8*exp(0.0365_r8*temp_C)
 
       ! calculate moisture
-      if (wmo < ed .and. wmo < ew) then
-        wm = ew - (ew - wmo)/(10.0_r8**x)
+      if (moist_prev < ed .and. moist_prev < ew) then
+        wm = ew - (ew - moist_prev)/(10.0_r8**x)
       else
-        wm = wmo
+        wm = moist_prev
       end if
 
       ! log of wetting rate at normal temperature of 21.1degC
-      if (wmo > ed) then
+      if (moist_prev > ed) then
         z = 0.424_r8*(1.0_r8 - (rh/100.0_r8)**1.7_r8) + 0.0694_r8*sqrt(wind_kmhr)*       &
           (1.0_r8 - (rh/100.0_r8)**8.0_r8)
       end if
@@ -271,8 +271,8 @@ module SFCanadianFireWeatherMod
       x = z*0.581_r8*exp(0.0365_r8*temp_C)
 
       ! calculate moisture
-      if (wmo > ed) then
-        wm = ed + (wmo - ed)/(10.0_r8**x)
+      if (moist_prev > ed) then
+        wm = ed + (moist_prev - ed)/(10.0_r8**x)
       end if
 
       ! calculate ffmc and correct for outside bounds

@@ -207,7 +207,7 @@ module FatesFuelMod
           class default 
             write(fates_log(), *) 'Unknown fire weather class selected.'
             write(fates_log(), *) 'Choose a different fire weather class or upate this subroutine.'
-            call endrun(msg=errMsg( __FILE__, __LINE__))
+            call endrun(msg=errMsg(__FILE__, __LINE__))
         end select
         
         this%average_moisture = 0.0_r8
