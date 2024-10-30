@@ -117,7 +117,8 @@ module SyntheticFuelModels
     
   subroutine AddFuelModel(this, fuel_model_index, carrier, fuel_model_name,              &
     wind_adj_factor, hr1_loading, hr10_loading, hr100_loading, live_herb_loading,        &
-    live_woody_loading, fuel_depth)
+    live_woody_loading, fuel_depth, hr1_sav, live_herb_sav, live_woody_sav,              &
+    moist_extinct)
     !
     ! DESCRIPTION:
     ! Adds a fuel model to the dynamic array
@@ -137,6 +138,10 @@ module SyntheticFuelModels
     real(r8),                       intent(in)    :: live_herb_loading  ! loading for live herbacious fuels [tons/acre]
     real(r8),                       intent(in)    :: live_woody_loading ! loading for live woody fuels [tons/acre]
     real(r8),                       intent(in)    :: fuel_depth         ! fuel bed depth [ft]
+    real(r8),                       intent(in)    :: hr1_sav            ! surface area to volume ratio of 1 hour fuels [/ft]
+    real(r8),                       intent(in)    :: live_herb_sav      ! surface area to volume ratio of live herbacious fuels [/ft]
+    real(r8),                       intent(in)    :: live_woody_sav     ! surface area to volume ratio of live woody fuels [/ft]
+    real(r8),                       intent(in)    :: moist_extinct      ! dead fuel extinction moisture [%]
     
     ! LOCALS:
     type(synthetic_fuel_model)              :: fuel_model         ! fuel model
@@ -162,7 +167,7 @@ module SyntheticFuelModels
     
     call fuel_model%InitFuelModel(fuel_model_index, carrier, fuel_model_name,            &
       wind_adj_factor, hr1_loading, hr10_loading, hr100_loading, live_herb_loading,      &
-      live_woody_loading, fuel_depth)
+      live_woody_loading, fuel_depth, hr1_sav, live_herb_sav, live_woody_sav, moist_extinct)
     
     this%fuel_models(this%num_fuel_models) = fuel_model
       
@@ -206,57 +211,106 @@ module SyntheticFuelModels
     ! ARGUMENTS:
     class(fuel_models_array_class), intent(inout) :: this ! array of fuel models
     
-    call this%AddFuelModel(fuel_model_index=1, carrier='GR', fuel_model_name='short grass',   &
-      wind_adj_factor=0.36_r8, hr1_loading=0.7_r8, hr10_loading=0.0_r8, hr100_loading=0.0_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8)
+    ! governed by fine herbaceous fuels that are cured or nearly cured
+    ! fires move rapidly through cured grass and associated material
+    ! very little shrub or timber present
+    ! grasslands/savanna are represented along with stubble, grass tundra, grass-shrub combinations
+    ! annual and perennial grasses are included fuels
+    call this%AddFuelModel(fuel_model_index=1, carrier='GR', fuel_model_name='short grass',     &
+      wind_adj_factor=0.36_r8, hr1_loading=0.7_r8, hr10_loading=0.0_r8, hr100_loading=0.0_r8,   &
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8,                   &
+      hr1_sav=3500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=12.0_r8)
       
+    ! fire spread primarily through herbaceous fuels, either curing or dead
+    ! surface fires
     call this%AddFuelModel(fuel_model_index=2, carrier='GR', fuel_model_name='timber and grass understory', &
       wind_adj_factor=0.36_r8, hr1_loading=2.0_r8, hr10_loading=1.0_r8, hr100_loading=0.5_r8,               &
-      live_herb_loading=0.5_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8)
-      
+      live_herb_loading=0.5_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8,                               &
+      hr1_sav=3000.0_r8, live_herb_sav=1500.0_r8, live_woody_sav=0.0_r8, moist_extinct=15.0_r8)
+    
+    ! most intense of grass group - high rates of spread under influence of wind
     call this%AddFuelModel(fuel_model_index=3, carrier='GR', fuel_model_name='tall grass',    &
       wind_adj_factor=0.44_r8, hr1_loading=3.0_r8, hr10_loading=0.0_r8, hr100_loading=0.0_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=2.5_r8)
-      
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=2.5_r8,                 &
+      hr1_sav=1500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=25.0_r8)
+    
+    ! fire intensity and fast-spreading fires involve foliage and live and dead fine woody material in shrub layer
+    ! dead woody material contributes significantly to fire intensity
+    ! deep litter layer may confound suppression efforts
     call this%AddFuelModel(fuel_model_index=4, carrier='SH', fuel_model_name='chapparal',     &
       wind_adj_factor=0.55_r8, hr1_loading=5.0_r8, hr10_loading=4.0_r8, hr100_loading=2.0_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=5.0_r8, fuel_depth=6.0_r8)
-   
+      live_herb_loading=0.0_r8, live_woody_loading=5.0_r8, fuel_depth=6.0_r8,                 &
+      hr1_sav=2000.0_r8, live_herb_sav=0.0_r8, live_woody_sav=1500.0_r8, moist_extinct=20.0_r8)
+    
+    ! primary carrier is litter from shrubs, and grasses/forbs in understory
+    ! shrubs generally not tall, but have nearly total coverage of area
+    ! young, green stands with no deadwood
     call this%AddFuelModel(fuel_model_index=5, carrier='SH', fuel_model_name='brush',         &
       wind_adj_factor=0.42_r8, hr1_loading=1.0_r8, hr10_loading=0.5_r8, hr100_loading=0.0_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=2.0_r8, fuel_depth=2.0_r8)
+      live_herb_loading=0.0_r8, live_woody_loading=2.0_r8, fuel_depth=2.0_r8,                 &
+      hr1_sav=2000.0_r8, live_herb_sav=0.0_r8, live_woody_sav=1500.0_r8, moist_extinct=20.0_r8)
     
+    ! fire carries through shrub layer, requiring at least moderate winds
+    ! fire will drop to ground at low wind speeds or openings in stand
+    ! shrubs are older
     call this%AddFuelModel(fuel_model_index=6, carrier='SH', fuel_model_name='dormant brush', &
       wind_adj_factor=0.44_r8, hr1_loading=1.5_r8, hr10_loading=2.5_r8, hr100_loading=2.0_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=2.5_r8)
-
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=2.5_r8,                 &
+      hr1_sav=1750.0_r8, live_herb_sav=0.0_r8, live_woody_sav=1500.0_r8, moist_extinct=25.0_r8)
+    
+    ! fires burn through surface and shrub strata with equal ease and can occur at higher dead
+    ! fuel moisture contents because of flammable nature of live foliage and other live material
+    ! stands of shrubs generally between 2-6 ft high
     call this%AddFuelModel(fuel_model_index=7, carrier='SH', fuel_model_name='southern rough', &
       wind_adj_factor=0.44_r8, hr1_loading=1.1_r8, hr10_loading=1.9_r8, hr100_loading=1.0_r8,  &
-      live_herb_loading=0.0_r8, live_woody_loading=0.4_r8, fuel_depth=2.5_r8)
-      
+      live_herb_loading=0.0_r8, live_woody_loading=0.4_r8, fuel_depth=2.5_r8,                  &
+      hr1_sav=1750.0_r8, live_herb_sav=0.0_r8, live_woody_sav=1500.0_r8, moist_extinct=40.0_r8)
+    
+    ! slow-burning ground fires with low flame heights
+    ! layer mainly needles, leaves, and some twigs
     call this%AddFuelModel(fuel_model_index=8, carrier='TL', fuel_model_name='compact timber litter', &
       wind_adj_factor=0.28_r8, hr1_loading=1.5_r8, hr10_loading=1.0_r8, hr100_loading=2.5_r8,         &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=0.2_r8)
-      
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=0.2_r8,                         &
+      hr1_sav=2000.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=30.0_r8)
+    
+    ! long-needle conifer and hardwood stands typical
     call this%AddFuelModel(fuel_model_index=9, carrier='TL', fuel_model_name='hardwood litter', &
       wind_adj_factor=0.28_r8, hr1_loading=2.9_r8, hr10_loading=0.4_r8, hr100_loading=0.2_r8,   &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=0.2_r8)
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=0.2_r8,                   &
+      hr1_sav=2500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=25.0_r8)
     
+    ! dead down fuels include greater quantities of 3-inch or larger limbwood resulting from over 
+    ! maturity or natural events that create a large load of dead material
+    ! crown fire and spotting is more frequent
     call this%AddFuelModel(fuel_model_index=10, carrier='TU', fuel_model_name='timber and litter understorey', &
       wind_adj_factor=0.46_r8, hr1_loading=3.0_r8, hr10_loading=2.0_r8, hr100_loading=5.0_r8,                  &
-      live_herb_loading=0.0_r8, live_woody_loading=2.0_r8, fuel_depth=1.0_r8)
-      
+      live_herb_loading=0.0_r8, live_woody_loading=2.0_r8, fuel_depth=1.0_r8,                                  &
+      hr1_sav=2000.0_r8, live_herb_sav=0.0_r8, live_woody_sav=1500.0_r8, moist_extinct=25.0_r8)
+    
+    ! fires are fairly active in the slash and intermixed herbaceous material
+    ! spacing of the rather light fuel load, shading from overstory, or the aging of the 
+    ! fine fuels can contribute to limiting the fire potential 
     call this%AddFuelModel(fuel_model_index=11, carrier='SB', fuel_model_name='light slash',  &
       wind_adj_factor=0.36_r8, hr1_loading=1.5_r8, hr10_loading=4.5_r8, hr100_loading=5.5_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8)
-      
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8,                 &
+      hr1_sav=1500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=15.0_r8)
+    
+    ! rapidly spreading fires with high intensities capable of generating firebrands can occur
+    ! when fire starts, it is generally sustained until a fuel break or change in fuels is encountered
+    ! visual impression is dominated by slash, most of it less than 3 inches in diameter
     call this%AddFuelModel(fuel_model_index=12, carrier='SB', fuel_model_name='medium slash',   &
       wind_adj_factor=0.43_r8, hr1_loading=4.0_r8, hr10_loading=14.0_r8, hr100_loading=16.5_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=2.3_r8)
-      
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=2.3_r8,                 &
+      hr1_sav=1500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=20.0_r8)
+    
+    ! fire is generally carried across the area by a continuous layer of slash 
+    ! large quantities of greater-than-3-inch material are present
+    ! active flaming is sustained for long periods and firebrands of various sizes may be generated
+    ! these contribute to spotting problems
     call this%AddFuelModel(fuel_model_index=13, carrier='SB', fuel_model_name='heavy slash',    &
       wind_adj_factor=0.46_r8, hr1_loading=7.0_r8, hr10_loading=23.0_r8, hr100_loading=28.1_r8, &
-      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=3.0_r8)
+      live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=3.0_r8,                 &
+      hr1_sav=1500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=25.0_r8)
       
       
     ! Scott and Burgen -----------
