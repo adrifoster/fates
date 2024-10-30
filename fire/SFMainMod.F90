@@ -436,28 +436,26 @@ contains
     type(ed_site_type), intent(in), target :: currentSite ! site object
 
     ! LOCALS:
-    type(fates_patch_type), pointer :: currentPatch ! patch object   
-    real(r8)                        :: beta         ! packing ratio of fuel [unitless]
-    real(r8)                        :: beta_op      ! optimum packing ratio of fuel [unitless]
-    real(r8)                        :: i_r          ! reaction intensity [kJ/m2/min]
-    real(r8)                        :: prop_flux    ! propagating flux [unitless]
-    real(r8)                        :: phi_wind     ! wind coefficient [unitless]
-    real(r8)                        :: eps          ! effective heating number [unitless]
-    real(r8)                        :: q_ig         ! heat of pre-ignition [kJ/kg]
-    real(r8)                        :: beta_ratio   ! ratio of beta/beta_op
+    type(fates_patch_type), pointer :: currentPatch        ! patch object   
+    real(r8)                        :: beta                ! packing ratio of fuel [unitless]
+    real(r8)                        :: beta_op             ! optimum packing ratio of fuel [unitless]
+    real(r8)                        :: i_r                 ! reaction intensity [kJ/m2/min]
+    real(r8)                        :: prop_flux           ! propagating flux [unitless]
+    real(r8)                        :: phi_wind            ! wind coefficient [unitless]
+    real(r8)                        :: eps                 ! effective heating number [unitless]
+    real(r8)                        :: q_ig                ! heat of pre-ignition [kJ/kg]
+    real(r8)                        :: beta_ratio          ! ratio of beta/beta_op
+    real(r8)                        :: non_mineral_loading ! net fuel loading without mineral content [kg/m2]
 
     currentPatch => currentSite%oldest_patch
     do while(associated(currentPatch))
 
-      if (currentPatch%nocomp_pft_label =/ nocomp_bareground .and. currentPatch%fuel%non_trunk_loading > nearzero) then
+      if (currentPatch%nocomp_pft_label =/ nocomp_bareground .and.                       &
+        currentPatch%fuel%non_trunk_loading > nearzero) then
                        
-        ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
-        currentPatch%fuel%non_trunk_loading = currentPatch%fuel%non_trunk_loading * (1.0_r8 - SF_val_miner_total) !net of minerals
-
         ! fraction of fuel array volume occupied by fuel or compactness of fuel bed 
         beta = currentPatch%fuel%bulk_density_notrunks/SF_val_part_dens
 
-        ! Equation A6 in Thonicke et al. 2010
         ! optimum packing ratio
         beta_op = 0.200395_r8*(currentPatch%fuel%SAV_notrunks**(-0.8189_r8))
 
@@ -471,16 +469,19 @@ contains
         eps = EffectiveHeatingNumber(currentPatch%fuel%SAV)
 
         ! calculate wind coefficient [unitless]
-        phi_wind = PhiWind(currentSite%effective_windspeed, beta_ratio,                  &
+        phi_wind = PhiWind(currentSite%fireWeather%effective_windspeed, beta_ratio,      &
           currentPatch%fuel%SAV_notrunks)
 
         ! calculate propagating flux [unitless]
         prop_flux = PropagatingFlux(currentPatch%fuel%SAV_notrunks, beta)
 
         ! calculate reaction intensity [kJ/m2/min]
-        i_r = ReactionIntensity(currentPatch%fuel%non_trunk_loading,                     &
-          currentPatch%fuel%SAV_notrunks, beta_ratio,                                    &
-          currentPatch%fuel%average_moisture_notrunks, currentPatch%fuel%MEF_notrunks)
+        
+        ! remove mineral content from net fuel load per Thonicke 2010
+        non_mineral_loading = currentPatch%fuel%non_trunk_loading*(1.0_r8 - SF_val_miner_total) 
+        
+        i_r = ReactionIntensity(non_mineral_loading, currentPatch%fuel%SAV_notrunks,     &
+          beta_ratio, currentPatch%fuel%average_moisture_notrunks, currentPatch%fuel%MEF_notrunks)
 
         ! rate of forward spread
         currentPatch%ROS_front = RateOfSpread(currentPatch%fuel%bulk_density_notrunks,   &
