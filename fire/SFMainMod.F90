@@ -25,7 +25,7 @@ module SFMainMod
   use FatesCohortMod,         only : fates_cohort_type
   use EDtypesMod,             only : AREA
   use FatesLitterMod,         only : litter_type
-  use FatesFuelClassesMod,    only : nfsc
+  use FatesFuelClassesMod,    only : num_fuel_classes
   use PRTGenericMod,          only : leaf_organ
   use PRTGenericMod,          only : carbon12_element
   use PRTGenericMod,          only : sapw_organ
@@ -138,9 +138,6 @@ contains
 
     ! convert to m/min 
     currentSite%wind = wind*sec_per_min
-    if (hlm_masterproc == itrue) then 
-      write(fates_log(),*) 'wind_in', wind
-    end if 
 
     ! update fire weather index
     call currentSite%fireWeather%UpdateIndex(temp_C, precip, rh, wind)
@@ -183,7 +180,7 @@ contains
 
         ! update fuel loading [kgC/m2]
         litter => currentPatch%litter(element_pos(carbon12_element))
-        call currentPatch%fuel%CalculateLoading(sum(litter%leaf_fines(:)),               &
+        call currentPatch%fuel%UpdateLoading(sum(litter%leaf_fines(:)),                  &
           litter%ag_cwd(1), litter%ag_cwd(2), litter%ag_cwd(3), litter%ag_cwd(4),        &
           currentPatch%livegrass)
             
@@ -193,11 +190,11 @@ contains
           
         ! calculate fuel moisture [m3/m3]
         call currentPatch%fuel%UpdateFuelMoisture(SF_val_SAV, SF_val_drying_ratio,       &
-          currentSite%fireWeather, MEF_trunks, fuel_moisture_trunks)
+          currentSite%fireWeather)
         
         ! calculate geometric properties
-        call currentPatch%fuel%AverageBulkDensity(SF_val_FBD)
-        call currentPatch%fuel%AverageSAV(SF_val_SAV)
+        call currentPatch%fuel%AverageBulkDensity_NoTrunks(SF_val_FBD)
+        call currentPatch%fuel%AverageSAV_NoTrunks(SF_val_SAV)
             
       end if 
       currentPatch => currentPatch%younger
@@ -212,8 +209,8 @@ contains
     !  DESCRIPTION:
     !  Calculates the heat of preignition for rate of spread [kJ/kg]
     !  From Equation A4 in Thonicke et al. 2010
-    !  Rothermal EQ12 = 250 Btu/lb + 1116 Btu/lb * average_moisture
-    !  conversion of Rothermal (1972) EQ12 in BTU/lb to current kJ/kg 
+    !  Rothermel EQ12 = 250 Btu/lb + 1116 Btu/lb * average_moisture
+    !  conversion of Rothermel (1972) EQ12 in BTU/lb to current kJ/kg 
     !
     
     ! ARGUMENTS:
@@ -285,7 +282,7 @@ contains
     !
     !  DESCRIPTION:
     !  Calculates propagating flux for ROS equation [unitless]
-    !  From Equation A2 in Thonicke et al.2010 and Eq. 42 Rothermal 1972
+    !  From Equation A2 in Thonicke et al.2010 and Eq. 42 Rothermel 1972
     !
     
     ! ARGUMENTS:
@@ -452,45 +449,42 @@ contains
     currentPatch => currentSite%oldest_patch
     do while(associated(currentPatch))
 
-      if (currentPatch%nocomp_pft_label =/ nocomp_bareground .and. currentPatch%fuel%total_loading > nearzero) then
+      if (currentPatch%nocomp_pft_label =/ nocomp_bareground .and. currentPatch%fuel%non_trunk_loading > nearzero) then
                        
         ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
-        currentPatch%fuel%total_loading = currentPatch%fuel%total_loading * (1.0_r8 - SF_val_miner_total) !net of minerals
+        currentPatch%fuel%non_trunk_loading = currentPatch%fuel%non_trunk_loading * (1.0_r8 - SF_val_miner_total) !net of minerals
 
-        ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
-        currentPatch%fuel%total_loading = currentPatch%fuel%total_loading*               &
-        (1.0_r8 - SF_val_miner_total) 
-        
         ! fraction of fuel array volume occupied by fuel or compactness of fuel bed 
-        beta = currentPatch%fuel%bulk_density/SF_val_part_dens
+        beta = currentPatch%fuel%bulk_density_notrunks/SF_val_part_dens
 
         ! Equation A6 in Thonicke et al. 2010
         ! optimum packing ratio
-        beta_op = 0.200395_r8*(currentPatch%fuel%SAV**(-0.8189_r8))
+        beta_op = 0.200395_r8*(currentPatch%fuel%SAV_notrunks**(-0.8189_r8))
 
         ! ratio of packing ratio to optimum ratio
         beta_ratio = beta/beta_op
 
         ! calculate heat of preignition [kJ/kg]
-        q_ig = HeatOfPreignition(currentPatch%fuel%average_moisture)
+        q_ig = HeatOfPreignition(currentPatch%fuel%average_moisture_notrunks)
 
         ! effective heating number [unitless]
         eps = EffectiveHeatingNumber(currentPatch%fuel%SAV)
 
         ! calculate wind coefficient [unitless]
-        phi_wind = PhiWind(currentSite%effective_windspeed, beta_ratio, currentPatch%fuel%SAV)
+        phi_wind = PhiWind(currentSite%effective_windspeed, beta_ratio,                  &
+          currentPatch%fuel%SAV_notrunks)
 
         ! calculate propagating flux [unitless]
-        prop_flux = PropagatingFlux(currentPatch%fuel%SAV, beta)
+        prop_flux = PropagatingFlux(currentPatch%fuel%SAV_notrunks, beta)
 
         ! calculate reaction intensity [kJ/m2/min]
-        i_r = ReactionIntensity(currentPatch%fuel%total_loading,                         &
-          currentPatch%fuel%SAV, beta_ratio, currentPatch%fuel%average_moisture,         &
-          currentPatch%fuel%MEF)
+        i_r = ReactionIntensity(currentPatch%fuel%non_trunk_loading,                     &
+          currentPatch%fuel%SAV_notrunks, beta_ratio,                                    &
+          currentPatch%fuel%average_moisture_notrunks, currentPatch%fuel%MEF_notrunks)
 
         ! rate of forward spread
-        currentPatch%ROS_front = RateOfSpread(currentPatch%fuel%bulk_density, eps,       &
-          q_ig, i_r, prop_flux, phi_wind)
+        currentPatch%ROS_front = RateOfSpread(currentPatch%fuel%bulk_density_notrunks,   &
+          eps, q_ig, i_r, prop_flux, phi_wind)
 
         ! Equation 10 in Thonicke et al. 2010
         ! backward ROS from Can FBP System (1992) in m/min
@@ -517,8 +511,8 @@ contains
     type(litter_type), pointer      :: litt_c           ! carbon 12 litter pool
     
     real(r8) :: moist           !effective fuel moisture
-    real(r8) :: tau_b(nfsc)     !lethal heating rates for each fuel class (min) 
-    real(r8) :: fc_ground(nfsc) !total amount of fuel consumed per area of burned ground (kg C / m2 of burned area)
+    real(r8) :: tau_b(num_fuel_classes)     !lethal heating rates for each fuel class (min) 
+    real(r8) :: fc_ground(num_fuel_classes) !total amount of fuel consumed per area of burned ground (kg C / m2 of burned area)
     integer :: tr_sf, tw_sf, dl_sf, lg_sf
     integer  :: c
     
@@ -536,7 +530,7 @@ contains
          currentPatch%fuel%frac_burnt(:) = 1.0_r8       
          ! Calculate fraction of litter is burnt for all classes. 
          ! Equation B1 in Thonicke et al. 2010---
-         do c = 1, nfsc    !work out the burnt fraction for all pools, even if those pools dont exist.         
+         do c = 1, num_fuel_classes    !work out the burnt fraction for all pools, even if those pools dont exist.         
             moist = currentPatch%fuel%effective_moisture(c)                  
             ! 1. Very dry litter
             if (moist <= SF_val_min_moisture(c)) then
@@ -582,8 +576,8 @@ contains
        ! taul is the duration of the lethal heating.  
        ! The /10 is to convert from kgC/m2 into gC/cm2, as in the Peterson and Ryan paper #Rosie,Jun 2013
         
-       do c = 1,nfsc 
-          tau_b(c)   =  39.4_r8 *(currentPatch%fuel%frac_loading(c)*currentPatch%fuel%total_loading/0.45_r8/10._r8)* &
+       do c = 1,num_fuel_classes 
+          tau_b(c)   =  39.4_r8 *(currentPatch%fuel%frac_loading(c)*currentPatch%fuel%non_trunk_loading/0.45_r8/10._r8)* &
                (1.0_r8-((1.0_r8-currentPatch%fuel%frac_burnt(c))**0.5_r8))  
        enddo
        tau_b(tr_sf)   =  0.0_r8
