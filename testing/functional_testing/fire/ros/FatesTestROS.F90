@@ -2,7 +2,7 @@ program FatesTestROS
   
   use FatesConstantsMod,           only : r8 => fates_r8 
   use EDTypesMod,                  only : ed_site_type
-  use FatesTestFireMod,            only : SetUpFuel, ReadDatmData, WriteFireData
+  use FatesTestFireMod,            only : SetUpFuel, WriteFireData
   use FatesArgumentUtils,          only : command_line_arg
   use FatesUnitTestParamReaderMod, only : fates_unit_test_param_reader
   use SyntheticFuelModels,         only : fuel_models_array_class
@@ -70,9 +70,6 @@ program FatesTestROS
   ! read in parameter file
   call param_reader%Init(param_file)
   call param_reader%RetrieveParameters()
-  
-  ! read in DATM data
-  call ReadDatmData(datm_file, temp_degC, precip, rh, wind)
   
   ! set up fire weather class
   allocate(nesterov_index :: fireWeather)

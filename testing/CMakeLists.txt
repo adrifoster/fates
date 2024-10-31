@@ -8,3 +8,6 @@ add_subdirectory(functional_testing/fire/fuel fates_fuel_ftest)
 ## Unit tests
 add_subdirectory(unit_testing/fire_weather_test fates_fire_weather_utest)
 add_subdirectory(unit_testing/fire_fuel_test fates_fire_fuel_utest)
+
+## shared code
+add_subdirectory(functional_testing/fire/shr fates_fire_shr)

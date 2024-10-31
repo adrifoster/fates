@@ -132,11 +132,11 @@ module SyntheticFuelModels
     character(len=2),               intent(in)    :: carrier            ! main carrier
     character(len=*),               intent(in)    :: fuel_model_name    ! fuel model long name
     real(r8),                       intent(in)    :: wind_adj_factor    ! wind adjustment factor
-    real(r8),                       intent(in)    :: hr1_loading        ! loading for 1-hr fuels [tons/acre]
-    real(r8),                       intent(in)    :: hr10_loading       ! loading for 10-hr fuels [tons/acre]
-    real(r8),                       intent(in)    :: hr100_loading      ! loading for 100-hr fuels [tons/acre]
-    real(r8),                       intent(in)    :: live_herb_loading  ! loading for live herbacious fuels [tons/acre]
-    real(r8),                       intent(in)    :: live_woody_loading ! loading for live woody fuels [tons/acre]
+    real(r8),                       intent(in)    :: hr1_loading        ! loading for 1-hr fuels [US tons/acre]
+    real(r8),                       intent(in)    :: hr10_loading       ! loading for 10-hr fuels [US tons/acre]
+    real(r8),                       intent(in)    :: hr100_loading      ! loading for 100-hr fuels [US tons/acre]
+    real(r8),                       intent(in)    :: live_herb_loading  ! loading for live herbacious fuels [us tons/acre]
+    real(r8),                       intent(in)    :: live_woody_loading ! loading for live woody fuels [US tons/acre]
     real(r8),                       intent(in)    :: fuel_depth         ! fuel bed depth [ft]
     real(r8),                       intent(in)    :: hr1_sav            ! surface area to volume ratio of 1 hour fuels [/ft]
     real(r8),                       intent(in)    :: live_herb_sav      ! surface area to volume ratio of live herbacious fuels [/ft]
