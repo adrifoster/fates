@@ -99,7 +99,6 @@ program FatesTestROS
     call fuel(f)%CalculateFractionalLoading()
      
     beta(f) = fuel(f)%bulk_density_notrunks/SF_val_part_dens
-    print *, SF_val_part_dens
     beta_op(f) = 0.200395_r8*(fuel(f)%SAV_notrunks**(-0.8189_r8))
     beta_ratio = beta(f)/beta_op(f)
     
