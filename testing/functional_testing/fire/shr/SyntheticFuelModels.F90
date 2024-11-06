@@ -18,7 +18,7 @@ module SyntheticFuelModels
   integer,  parameter :: chunk_size = 10
   real(r8), parameter :: ustons_to_kg = 907.185_r8
   real(r8), parameter :: acres_to_m2 = 4046.86_r8
-  real(r8), parameter :: ustons_acre_to_kgC_m2 = ustons_to_kg/acres_to_m2*0.45_r8
+  real(r8), parameter :: ustons_acre_to_kgC_m2 = ustons_to_kg/acres_to_m2 !*0.45_r8
   real(r8), parameter :: ft_to_m = 0.3048_r8
   
   ! holds data for fake fuel models that can be used for functional
@@ -41,10 +41,14 @@ module SyntheticFuelModels
     real(r8)           :: live_herb_sav       ! surface area to volume ratio of live herbacious fuels [/cm]
     real(r8)           :: live_woody_sav      ! surface area to volume ratio of live woody fuels [/cm]
     real(r8)           :: moist_extinct       ! dead fuel extinction moisture [m3/m3]
+    real(r8)           :: sum_fuel            ! total fuel loading
+    real(r8)           :: bulk_density        ! bulk density [kg/m2]
+    real(r8)           :: sav                 ! sav [/cm]
     
     contains 
     
       procedure :: InitFuelModel
+      procedure :: CalculateMoisture
   
   end type synthetic_fuel_model
     
@@ -95,6 +99,9 @@ module SyntheticFuelModels
     real(r8),                    intent(in)    :: live_herb_sav      ! surface area to volume ratio of live herbacious fuels [/ft]
     real(r8),                    intent(in)    :: live_woody_sav     ! surface area to volume ratio of live woody fuels [/ft]
     real(r8),                    intent(in)    :: moist_extinct      ! dead fuel extinction moisture [%]
+    
+    ! LOCALS:
+    real(r8) :: fine_fuel_loading ! fine fuel loading [kg/m2]
         
     this%fuel_model_index = fuel_model_index
     this%carrier = carrier 
@@ -106,12 +113,46 @@ module SyntheticFuelModels
     this%live_herb_loading = live_herb_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
     this%live_woody_loading = live_woody_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
     this%fuel_depth = fuel_depth*ft_to_m ! convert to m
-    this%hr1_sav = hr1_sav*ft_to_m/100.0_r8 ! convert to cm
-    this%live_herb_sav = live_herb_sav*ft_to_m/100.0_r8 ! convert to cm
-    this%live_woody_sav = live_woody_sav*ft_to_m/100.0_r8 ! convert to cm
+    this%hr1_sav = hr1_sav/ft_to_m/100.0_r8 ! convert to cm
+    this%live_herb_sav = live_herb_sav/ft_to_m/100.0_r8 ! convert to cm
+    this%live_woody_sav = live_woody_sav/ft_to_m/100.0_r8 ! convert to cm
     this%moist_extinct = moist_extinct/100.0_r8 ! convert to [m3/m3]
+    
+    this%sum_fuel = this%hr1_loading + this%hr10_loading + this%hr100_loading
+    fine_fuel_loading = this%hr1_loading + this%live_herb_loading + this%hr10_loading + this%hr100_loading
+    this%bulk_density = (this%hr1_loading + this%live_herb_loading)/this%fuel_depth
+    
+    this%sav = (this%hr1_loading/fine_fuel_loading)*this%hr1_sav +                       &
+      (this%hr10_loading/fine_fuel_loading)*109.0_r8/ft_to_m/100.0_r8 +                  &
+      (this%hr100_loading/fine_fuel_loading)*30.0_r8/ft_to_m/100.0_r8 +                  &
+      (this%live_herb_loading/fine_fuel_loading)*this%live_herb_sav 
+      
       
   end subroutine InitFuelModel
+  
+  ! --------------------------------------------------------------------------------------
+  
+  subroutine CalculateMoisture(this, hr1_moisture, hr10_moisture, hr100_moisture,        & 
+    live_herb_moisture, live_woody_moisture, moisture)
+    !
+    ! DESCRIPTION:
+    ! Calculates average fuel moisture for the synthetic fuel based on input values
+    !
+    
+    ! ARGUMENTS:
+    class(synthetic_fuel_model), intent(in)  :: this
+    real(r8),                    intent(in)  :: hr1_moisture        ! 1-hr fuel moisture [%]
+    real(r8),                    intent(in)  :: hr10_moisture       ! 10-hr fuel moisture [%]
+    real(r8),                    intent(in)  :: hr100_moisture      ! 100-hr fuel moisture [%]
+    real(r8),                    intent(in)  :: live_herb_moisture  ! live herb fuel moisture [%]
+    real(r8),                    intent(in)  :: live_woody_moisture ! live woody fuel moisture [%]
+    real(r8),                    intent(out) :: moisture            ! average fuel moisture [m3/m3]
+    
+    moisture = (this%hr1_loading/this%sum_fuel)*(hr1_moisture/100.0_r8) +             &
+               (this%hr10_loading/this%sum_fuel)*(hr10_moisture/100.0_r8) +           &
+               (this%hr100_loading/this%sum_fuel)*(hr100_moisture/100.0_r8) 
+    
+  end subroutine CalculateMoisture
   
   ! --------------------------------------------------------------------------------------
     

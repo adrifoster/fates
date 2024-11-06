@@ -19,7 +19,8 @@ module FatesTestFireMod
   implicit none
   private
 
-  public :: SetUpFuel, ReadDatmData, WriteFireData
+  public :: SetUpFuel, ReadDatmData, WriteFuelData
+  public :: WriteROSData
 
   contains 
 
@@ -67,6 +68,10 @@ module FatesTestFireMod
       
       call fuel%UpdateLoading(leaf_litter, twig_litter, small_branch_litter,    &
         large_branch_litter, 0.0_r8, grass_litter)
+        
+      fuel%MEF_notrunks = fuel_model_array%fuel_models(i)%moist_extinct
+      fuel%bulk_density_notrunks = fuel_model_array%fuel_models(i)%bulk_density
+      fuel%SAV_notrunks = fuel_model_array%fuel_models(i)%sav
       
     end subroutine SetUpFuel
 
@@ -104,7 +109,7 @@ module FatesTestFireMod
 
     !=====================================================================================
 
-    subroutine WriteFireData(out_file, nsteps, nfuelmods, temp_degC, precip, rh, NI,     &
+    subroutine WriteFuelData(out_file, nsteps, nfuelmods, temp_degC, precip, rh, NI,     &
       loading, frac_loading, fuel_BD, fuel_SAV, non_trunk_loading, fuel_moisture,            &
       fuel_models, carriers)
       !
@@ -269,6 +274,148 @@ module FatesTestFireMod
  
       call CloseNCFile(ncid)
 
-    end subroutine WriteFireData
+    end subroutine WriteFuelData
+    
+    !=====================================================================================
+    
+    subroutine WriteROSData(out_file, nwind, nmoisture, nfuelmods, wind_speed, beta,     &
+      beta_op, eps, prop_flux, q_ig, fuel_moisture, i_r, phi_wind, ros, fuel_models)
+      !
+      ! DESCRIPTION:
+      ! writes out data from the unit test
+      !
+    
+      ! ARGUMENTS:
+      character(len=*),   intent(in) :: out_file
+      integer,            intent(in) :: nwind
+      integer,            intent(in) :: nmoisture
+      integer,            intent(in) :: nfuelmods
+      real(r8),           intent(in) :: wind_speed(:)
+      real(r8),           intent(in) :: beta(:)
+      real(r8),           intent(in) :: beta_op(:)
+      real(r8),           intent(in) :: eps(:)
+      real(r8),           intent(in) :: prop_flux(:)
+      real(r8),           intent(in) :: q_ig(:)
+      real(r8),           intent(in) :: fuel_moisture(:,:)
+      real(r8),           intent(in) :: i_r(:,:)
+      real(r8),           intent(in) :: phi_wind(:,:)
+      real(r8),           intent(in) :: ros(:,:,:)
+      integer,            intent(in) :: fuel_models(:)
+            
+      ! LOCALS:
+      integer, allocatable :: time_index(:) ! array of time index
+      integer              :: ncid         ! netcdf id
+      integer              :: i            ! looping index
+      character(len=20)    :: dim_names(3) ! dimension names
+      integer              :: dimIDs(3)    ! dimension IDs
+      integer              :: windID, modID
+      integer              :: moistID, betaID
+      integer              :: beta_opID, epsID
+      integer              :: propfluxID, qigID
+      integer              :: fuelmoistID, irID
+      integer              :: phiwindID, rosID
+            
+      ! dimension names
+      dim_names = [character(len=20) :: 'wind_speed', 'fuel_model', 'moisture_class']
+
+      ! open file
+      call OpenNCFile(trim(out_file), ncid, 'readwrite')
+
+      ! register dimensions
+      call RegisterNCDims(ncid, dim_names, (/nwind, nfuelmods, nmoisture/), 3, dimIDs)
+
+      ! first register dimension variables
+      
+      ! register fuel models
+      call RegisterVar(ncid, 'wind_speed', dimIDs(1:1), type_double,  &
+        [character(len=20)  :: 'units', 'long_name'],                 &
+        [character(len=150) :: 'm s-1', 'mid-flame wind speed'], 2, windID)
+        
+      ! register fuel models
+      call RegisterVar(ncid, 'fuel_model', dimIDs(2:2), type_int,     &
+        [character(len=20)  :: 'units', 'long_name'],                 &
+        [character(len=150) :: '', 'fuel model index'], 2, modID)
+        
+      ! register moisture class
+      call RegisterVar(ncid, 'moisture_class', dimIDs(3:3), type_int,  &
+        [character(len=20)  :: 'units', 'long_name'],                  &
+        [character(len=150) :: '', 'moisture class'], 2, moistID)
+
+      ! then register actual variables
+    
+      ! register packing ratio
+      call RegisterVar(ncid, 'beta', dimIDs(2:2), type_double,          &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],    &
+        [character(len=150) :: 'fuel_model', '', 'packing ratio'],      &                                                  
+        3, betaID)
+      
+      ! register optimum packing ratio
+      call RegisterVar(ncid, 'beta_op', dimIDs(2:2), type_double,       &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],    &
+        [character(len=150) :: 'fuel_model', '', 'packing ratio'],      &                                                  
+        3, beta_opID)
+        
+      ! register effective heating number
+      call RegisterVar(ncid, 'eps', dimIDs(2:2), type_double,                 &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],          &
+        [character(len=150) :: 'fuel_model', '', 'effective heating number'], &                                                  
+        3, epsID)
+        
+      ! register propagating flux ratio
+      call RegisterVar(ncid, 'prop_flux', dimIDs(2:2), type_double,         &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],        &
+        [character(len=150) :: 'fuel_model', '', 'propagating flux ratio'], &                                                  
+        3, propfluxID)
+        
+      ! register heat of preignition
+      call RegisterVar(ncid, 'q_ig', dimIDs(3:3), type_double,              &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],        &
+        [character(len=150) :: 'moisture_class', 'kJ kg-1', 'heat of preignition'], &                                                  
+        3, qigID)
+        
+      ! register fuel moisture
+      call RegisterVar(ncid, 'fuel_moisture', dimIDs(2:3), type_double,              &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],                 &
+        [character(len=150) :: 'fuel_model moisture_class', 'm3 m-3', 'fuel moisture'],  &                                                  
+        3, fuelmoistID)
+      
+      ! register reaction intensity
+      call RegisterVar(ncid, 'i_r', dimIDs(2:3), type_double,              &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],                 &
+        [character(len=150) :: 'fuel_model moisture_class', 'kJ m-2 min-1', 'reaction intensity'],  &                                                  
+        3, irID)
+        
+      ! register wind factor
+      call RegisterVar(ncid, 'phi_wind', (/dimIDs(2), dimIDs(1)/), type_double, &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],                     &
+        [character(len=150) :: 'fuel_model wind_speed', '', 'wind factor'],  &                                                  
+        3, phiwindID)
+        
+      ! register ros
+      call RegisterVar(ncid, 'ros', (/dimIDs(2), dimIDs(3), dimIDs(1)/), type_double,    &
+        [character(len=20)  :: 'coordinates', 'units', 'long_name'],                     &
+        [character(len=150) :: 'fuel_model moisture_class wind_speed', 'm min-1', 'rate of forward spread'],  &                                                  
+        3, rosID)
+        
+      ! finish defining variables
+      call EndNCDef(ncid)
+
+      ! write out data
+      call WriteVar(ncid, windID, wind_speed(:))
+      call WriteVar(ncid, modID, fuel_models(:))
+      call WriteVar(ncid, moistID, (/1, 2, 3, 4/))
+      call WriteVar(ncid, betaID, beta(:))
+      call WriteVar(ncid, beta_opID, beta_op(:))
+      call WriteVar(ncid, epsID, eps(:))
+      call WriteVar(ncid, propfluxID, prop_flux(:))
+      call WriteVar(ncid, qigID, q_ig(:))
+      call WriteVar(ncid, fuelmoistID, fuel_moisture(:,:))
+      call WriteVar(ncid, irID, i_r(:,:))
+      call WriteVar(ncid, phiwindID, phi_wind(:,:))
+      call WriteVar(ncid, rosID, ros(:,:,:))
+ 
+      call CloseNCFile(ncid)
+
+    end subroutine WriteROSData
 
 end module FatesTestFireMod

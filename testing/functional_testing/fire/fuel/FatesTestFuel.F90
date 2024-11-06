@@ -1,8 +1,7 @@
 program FatesTestFuel
   
   use FatesConstantsMod,           only : r8 => fates_r8 
-  use EDTypesMod,                  only : ed_site_type
-  use FatesTestFireMod,            only : SetUpFuel, ReadDatmData, WriteFireData
+  use FatesTestFireMod,            only : SetUpFuel, ReadDatmData, WriteFuelData
   use FatesArgumentUtils,          only : command_line_arg
   use FatesUnitTestParamReaderMod, only : fates_unit_test_param_reader
   use SyntheticFuelModels,         only : fuel_models_array_class
@@ -116,7 +115,7 @@ program FatesTestFuel
   end do 
   
   ! write out data
-  call WriteFireData(out_file, n_days, num_fuel_models, temp_degC, precip, rh, NI,       &
+  call WriteFuelData(out_file, n_days, num_fuel_models, temp_degC, precip, rh, NI,       &
     fuel_loading, frac_loading, fuel_BD, fuel_SAV, non_trunk_loading, fuel_moisture,         &
     fuel_models, carriers)
   

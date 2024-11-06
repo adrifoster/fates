@@ -45,6 +45,12 @@ module SFMainMod
   public :: crown_damage
   public :: cambial_damage_kill
   public :: post_fire_mortality
+  public :: HeatOfPreignition
+  public :: EffectiveHeatingNumber
+  public :: PhiWind
+  public :: PropagatingFlux
+  public :: ReactionIntensity
+  public :: RateOfSpread
 
   integer :: write_SF = ifalse   ! for debugging
   logical :: debug = .false.     ! for debugging
@@ -168,7 +174,6 @@ contains
     ! LOCALS:
     type(fates_patch_type), pointer :: currentPatch ! FATES patch 
     type(litter_type),      pointer :: litter       ! pointer to patch litter class
-    real(r8) :: MEF_trunks, fuel_moisture_trunks
     
     currentPatch => currentSite%oldest_patch 
     do while(associated(currentPatch))  
@@ -201,7 +206,7 @@ contains
     end do 
 
   end subroutine UpdateFuelCharacteristics
-
+  
   !---------------------------------------------------------------------------------------
    
   real(r8) function HeatOfPreignition(fuel_moisture)
@@ -224,7 +229,6 @@ contains
   end function HeatOfPreignition
    
   !--------------------------------------------------------------------------------------
-   
   real(r8) function EffectiveHeatingNumber(SAV)
     !
     !  DESCRIPTION:
@@ -244,7 +248,7 @@ contains
   end function EffectiveHeatingNumber
    
   !---------------------------------------------------------------------------------------
-   
+  
   real(r8) function PhiWind(wind_speed, beta_ratio, SAV)
     !
     !  DESCRIPTION:
@@ -275,7 +279,7 @@ contains
     PhiWind = c*((3.281_r8*wind_speed)**b)*(beta_ratio**(-e))
   
   end function PhiWind
-   
+  
   !---------------------------------------------------------------------------------------
    
   real(r8) function PropagatingFlux(SAV, beta)
@@ -290,12 +294,12 @@ contains
     real(r8), intent(in) :: beta ! packing ratio of fuel [unitless]
     
     PropagatingFlux = (exp((0.792_r8 + 3.7597_r8*(SAV**0.5_r8))*(beta + 0.1_r8)))/       &
-      (192_r8+7.9095_r8*SAV)
+      (192.0_r8 + 7.9095_r8*SAV)
     
   end function PropagatingFlux
    
   !---------------------------------------------------------------------------------------
-   
+  
   real(r8) function MaximumReactionVelocity(SAV)
     !
     !  DESCRIPTION:
@@ -331,12 +335,12 @@ contains
     a = 8.9033_r8*(SAV**(-0.7913_r8))
     a_beta = exp(a*(1.0_r8 - beta_ratio)) 
     
-    OptimumReactionVelocity = reaction_v_max*(beta_ratio**a)*a_beta
+    OptimumReactionVelocity = max_reaction_vel*(beta_ratio**a)*a_beta
     
-  end function OptiumumReactionVelocity()
+  end function OptimumReactionVelocity
    
   !---------------------------------------------------------------------------------------
-   
+  
   real(r8) function MoistureCoefficient(moisture, MEF)
     !
     !  DESCRIPTION:
@@ -355,7 +359,7 @@ contains
     mw_weight = moisture/MEF
     
     ! moist_damp is unitless
-    moist_damp = max(0.0_r8, (1.0_r8 - (2.59_r8*mw_weight) +                             &
+    MoistureCoefficient = max(0.0_r8, (1.0_r8 - (2.59_r8*mw_weight) +                    &
       (5.11_r8*(mw_weight**2.0_r8)) - (3.52_r8*(mw_weight**3.0_r8))))
     
   end function MoistureCoefficient
@@ -393,13 +397,13 @@ contains
     moist_coeff = MoistureCoefficient(moisture, MEF)
     
     ! note fuel loading converted from kgC/m2 to kg/m2 
-    ReactionIntensity = opt_reaction_vel*(fuel_loading/0.45_r8)*SF_val_fuel_energy*      &
+    ReactionIntensity = opt_reaction_vel*(fuel_loading)*SF_val_fuel_energy*      &
       moist_coeff*SF_val_miner_damp 
 
   end function ReactionIntensity
    
   !---------------------------------------------------------------------------------------
-   
+  
   real(r8) function RateOfSpread(bulk_density, eps, q_ig, i_r, prop_flux, phi_wind)
     !
     !  DESCRIPTION:
@@ -424,7 +428,7 @@ contains
   end function RateOfSpread
    
   !---------------------------------------------------------------------------------------
-   
+  
   subroutine CalculateSurfaceRateOfSpread(currentSite)
     !
     !  DESCRIPTION:
@@ -450,7 +454,7 @@ contains
     currentPatch => currentSite%oldest_patch
     do while(associated(currentPatch))
 
-      if (currentPatch%nocomp_pft_label =/ nocomp_bareground .and.                       &
+      if (currentPatch%nocomp_pft_label /= nocomp_bareground .and.                       &
         currentPatch%fuel%non_trunk_loading > nearzero) then
                        
         ! fraction of fuel array volume occupied by fuel or compactness of fuel bed 
@@ -466,7 +470,7 @@ contains
         q_ig = HeatOfPreignition(currentPatch%fuel%average_moisture_notrunks)
 
         ! effective heating number [unitless]
-        eps = EffectiveHeatingNumber(currentPatch%fuel%SAV)
+        eps = EffectiveHeatingNumber(currentPatch%fuel%SAV_notrunks)
 
         ! calculate wind coefficient [unitless]
         phi_wind = PhiWind(currentSite%fireWeather%effective_windspeed, beta_ratio,      &
@@ -499,7 +503,8 @@ contains
   end subroutine  CalculateSurfaceRateOfSpread
    
   !---------------------------------------------------------------------------------------
-
+  
+  
   subroutine  ground_fuel_consumption ( currentSite ) 
   !*****************************************************************
     !returns the  the hypothetic fuel consumed by the fire
@@ -1034,3 +1039,5 @@ contains
 
   ! ============================================================================
 end module SFMainMod
+
+  
