@@ -40,28 +40,28 @@ module FatesTestFireMod
       character(len=2),              intent(out)   :: fuel_carrier     ! fuel carrier for fuel model
       
       ! LOCALS:
-      integer                         :: i                   ! position of fuel model in array
-      real(r8)                        :: leaf_litter         ! leaf litter [kg/m2] 
-      real(r8)                        :: twig_litter         ! twig litter [kg/m2]
-      real(r8)                        :: small_branch_litter ! small branch litter [kg/m2]
-      real(r8)                        :: large_branch_litter ! large branch litter [kg/m2]
-      real(r8)                        :: grass_litter        ! grass litter [kg/m2]
+      integer  :: i                   ! position of fuel model in array
+      real(r8) :: leaf_litter         ! leaf litter [kg/m2] 
+      real(r8) :: twig_litter         ! twig litter [kg/m2]
+      real(r8) :: small_branch_litter ! small branch litter [kg/m2]
+      real(r8) :: large_branch_litter ! large branch litter [kg/m2]
+      real(r8) :: grass_litter        ! grass litter [kg/m2]
       
 
       ! get fuel model position in array
       i = fuel_model_array%FuelModelPosition(fuel_model_index)
       
       ! fuel model data
-      leaf_litter = fuel_model_array%fuel_models(i)%hr1_loading
-      twig_litter = fuel_model_array%fuel_models(i)%hr10_loading
+      leaf_litter = fuel_model_array%fuel_models(i)%dead_fuel_loading(1)
+      twig_litter = fuel_model_array%fuel_models(i)%dead_fuel_loading(2)
       
       ! small vs. large branches based on input parameter file
-      small_branch_litter = fuel_model_array%fuel_models(i)%hr100_loading*SF_val_CWD_frac(2)/ &
+      small_branch_litter = fuel_model_array%fuel_models(i)%dead_fuel_loading(3)*SF_val_CWD_frac(2)/ &
         (SF_val_CWD_frac(2) + SF_val_CWD_frac(3))
-      large_branch_litter = fuel_model_array%fuel_models(i)%hr100_loading*SF_val_CWD_frac(3)/ &
+      large_branch_litter = fuel_model_array%fuel_models(i)%dead_fuel_loading(3)*SF_val_CWD_frac(3)/ &
         (SF_val_CWD_frac(2) + SF_val_CWD_frac(3))
         
-      grass_litter = fuel_model_array%fuel_models(i)%live_herb_loading
+      grass_litter = fuel_model_array%fuel_models(i)%live_fuel_loading(1)
       
       fuel_name = fuel_model_array%fuel_models(i)%fuel_model_name
       fuel_carrier = fuel_model_array%fuel_models(i)%carrier
@@ -69,14 +69,13 @@ module FatesTestFireMod
       call fuel%UpdateLoading(leaf_litter, twig_litter, small_branch_litter,    &
         large_branch_litter, 0.0_r8, grass_litter)
         
-      fuel%MEF_notrunks = fuel_model_array%fuel_models(i)%moist_extinct
+      ! update characteristics here
       fuel%bulk_density_notrunks = fuel_model_array%fuel_models(i)%bulk_density
-      fuel%SAV_notrunks = fuel_model_array%fuel_models(i)%sav
-      
+      fuel%SAV_notrunks = fuel_model_array%fuel_models(i)%sav      
     end subroutine SetUpFuel
 
     !=====================================================================================
-    
+  
     subroutine ReadDatmData(nc_file, temp_degC, precip, rh, wind)
       !
       ! DESCRIPTION:
@@ -279,7 +278,7 @@ module FatesTestFireMod
     !=====================================================================================
     
     subroutine WriteROSData(out_file, nwind, nmoisture, nfuelmods, wind_speed, beta,     &
-      beta_op, eps, prop_flux, q_ig, fuel_moisture, i_r, phi_wind, ros, fuel_models)
+      beta_op, eps, prop_flux, heat_sink, fuel_moisture, i_r, phi_wind, ros, fuel_models)
       !
       ! DESCRIPTION:
       ! writes out data from the unit test
@@ -295,7 +294,7 @@ module FatesTestFireMod
       real(r8),           intent(in) :: beta_op(:)
       real(r8),           intent(in) :: eps(:)
       real(r8),           intent(in) :: prop_flux(:)
-      real(r8),           intent(in) :: q_ig(:)
+      real(r8),           intent(in) :: heat_sink(:,:)
       real(r8),           intent(in) :: fuel_moisture(:,:)
       real(r8),           intent(in) :: i_r(:,:)
       real(r8),           intent(in) :: phi_wind(:,:)
@@ -311,7 +310,7 @@ module FatesTestFireMod
       integer              :: windID, modID
       integer              :: moistID, betaID
       integer              :: beta_opID, epsID
-      integer              :: propfluxID, qigID
+      integer              :: propfluxID, heatID
       integer              :: fuelmoistID, irID
       integer              :: phiwindID, rosID
             
@@ -367,11 +366,11 @@ module FatesTestFireMod
         [character(len=150) :: 'fuel_model', '', 'propagating flux ratio'], &                                                  
         3, propfluxID)
         
-      ! register heat of preignition
-      call RegisterVar(ncid, 'q_ig', dimIDs(3:3), type_double,              &
+      ! register heat sink
+      call RegisterVar(ncid, 'heat_sink', dimIDs(2:3), type_double,              &
         [character(len=20)  :: 'coordinates', 'units', 'long_name'],        &
-        [character(len=150) :: 'moisture_class', 'kJ kg-1', 'heat of preignition'], &                                                  
-        3, qigID)
+        [character(len=150) :: 'fuel_model moisture_class', 'kJ kg-1', 'heat sink'], &                                                  
+        3, heatID)
         
       ! register fuel moisture
       call RegisterVar(ncid, 'fuel_moisture', dimIDs(2:3), type_double,              &
@@ -408,7 +407,7 @@ module FatesTestFireMod
       call WriteVar(ncid, beta_opID, beta_op(:))
       call WriteVar(ncid, epsID, eps(:))
       call WriteVar(ncid, propfluxID, prop_flux(:))
-      call WriteVar(ncid, qigID, q_ig(:))
+      call WriteVar(ncid, heatID, heat_sink(:,:))
       call WriteVar(ncid, fuelmoistID, fuel_moisture(:,:))
       call WriteVar(ncid, irID, i_r(:,:))
       call WriteVar(ncid, phiwindID, phi_wind(:,:))

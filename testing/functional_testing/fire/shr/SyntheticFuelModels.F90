@@ -1,6 +1,7 @@
 module SyntheticFuelModels
   
   use FatesConstantsMod, only : r8 => fates_r8
+  use SFParamsMod,       only : SF_val_part_dens
 
   implicit none
   private
@@ -26,32 +27,42 @@ module SyntheticFuelModels
   ! these are taken from the fire behavior fuel models in Scott & Burgan 2005
   type, public :: synthetic_fuel_model
     
-    integer            :: fuel_model_index    ! fuel model index
-    character(len=2)   :: carrier             ! carrier ('GR', 'GS', etc.)
-    character(len=5)   :: fuel_model_code     ! carrier plus fuel model
-    character(len=100) :: fuel_model_name     ! long name of fuel model
-    real(r8)           :: wind_adj_factor     ! wind adjustment factor
-    real(r8)           :: hr1_loading         ! fuel loading for 1 hour fuels [kg/m2]
-    real(r8)           :: hr10_loading        ! fuel loading for 10 hour fuels [kg/m2]
-    real(r8)           :: hr100_loading       ! fuel loading for 100 hour fuels [kg/m2]
-    real(r8)           :: live_herb_loading   ! fuel loading for live herbacious fuels [kg/m2]
-    real(r8)           :: live_woody_loading  ! fuel loading for live woody fuels [kg/m2]
-    real(r8)           :: fuel_depth          ! fuel bed depth [m]
-    real(r8)           :: hr1_sav             ! surface area to volume ratio of 1 hour fuels [/cm]
-    real(r8)           :: live_herb_sav       ! surface area to volume ratio of live herbacious fuels [/cm]
-    real(r8)           :: live_woody_sav      ! surface area to volume ratio of live woody fuels [/cm]
-    real(r8)           :: moist_extinct       ! dead fuel extinction moisture [m3/m3]
-    real(r8)           :: sum_fuel            ! total fuel loading
-    real(r8)           :: bulk_density        ! bulk density [kg/m2]
-    real(r8)           :: sav                 ! sav [/cm]
-    
+    integer            :: fuel_model_index       ! fuel model index
+    character(len=2)   :: carrier                ! carrier ('GR', 'GS', etc.)
+    character(len=5)   :: fuel_model_code        ! carrier plus fuel model
+    character(len=100) :: fuel_model_name        ! long name of fuel model
+    real(r8)           :: wind_adj_factor        ! wind adjustment factor
+    real(r8)           :: dead_fuel_loading(3)   ! loading for 1 hr, 10 hr, and 100 hr fuels [kg/m2]
+    real(r8)           :: live_fuel_loading(2)   ! loading for live woody and herbaceous fuels [kg/m2]
+    real(r8)           :: fuel_depth             ! fuel bed depth [m]
+    real(r8)           :: dead_fuel_sav(3)       ! surface area to volume ratio of dead fuels [/cm]
+    real(r8)           :: live_fuel_sav(2)       ! surface area to volume ratio of live fuels [/cm]
+    real(r8)           :: dead_fuel_weighting(3) ! weighting factor for dead fuels [/cm]
+    real(r8)           :: live_fuel_weighting(2) ! weighting factor for dead fuels [/cm]
+    real(r8)           :: moist_extinct          ! dead fuel extinction moisture [m3/m3]
+    real(r8)           :: bulk_density           ! bulk density of fuel [kg/m3]
+    real(r8)           :: sav                    ! surface area to volume ratio of fuel [/cm]
+    real(r8)           :: mean_live_surf_area    ! average surface area of live fuels [m2]
+    real(r8)           :: mean_dead_surf_area    ! average surface area of dead fuels [m2]
+    real(r8)           :: net_loading_live       ! net fuel loading of live fuels [kg/m2]
+    real(r8)           :: net_loading_dead       ! net fuel loading of dead fuels [kg/m2]
+    real(r8)           :: q_ig_dead(3)
+    real(r8)           :: q_ig_live(2)
+    real(r8)           :: mean_weighting_live
+    real(r8)           :: mean_weighting_dead
+
     contains 
     
       procedure :: InitFuelModel
       procedure :: CalculateMoisture
+      procedure :: CalculateWeightingFactors
+      procedure :: CalculateSAV
+      procedure :: CalculateNetFuelLoad
+      procedure :: CalculateDeadLiveRatio
+      procedure :: CalculateHeatSink
   
   end type synthetic_fuel_model
-    
+  
   ! --------------------------------------------------------------------------------------
   
   ! a class to just hold an array of these fuel models
@@ -107,52 +118,355 @@ module SyntheticFuelModels
     this%carrier = carrier 
     this%fuel_model_name = fuel_model_name
     this%wind_adj_factor = wind_adj_factor
-    this%hr1_loading = hr1_loading*ustons_acre_to_kgC_m2 ! convert to kgC/m2
-    this%hr10_loading = hr10_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
-    this%hr100_loading = hr100_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
-    this%live_herb_loading = live_herb_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
-    this%live_woody_loading = live_woody_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
+    this%dead_fuel_loading(1) = hr1_loading*ustons_acre_to_kgC_m2 ! convert to kgC/m2
+    this%dead_fuel_loading(2) = hr10_loading*ustons_acre_to_kgC_m2 ! convert to kgC/m2
+    this%dead_fuel_loading(3) = hr100_loading*ustons_acre_to_kgC_m2 ! convert to kgC/m2
+    this%live_fuel_loading(1) = live_herb_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
+    this%live_fuel_loading(2) = live_woody_loading*ustons_acre_to_kgC_m2  ! convert to kgC/m2
     this%fuel_depth = fuel_depth*ft_to_m ! convert to m
-    this%hr1_sav = hr1_sav/ft_to_m/100.0_r8 ! convert to cm
-    this%live_herb_sav = live_herb_sav/ft_to_m/100.0_r8 ! convert to cm
-    this%live_woody_sav = live_woody_sav/ft_to_m/100.0_r8 ! convert to cm
+    this%dead_fuel_sav(1) = hr1_sav/ft_to_m/100.0_r8 ! convert to cm
+    this%dead_fuel_sav(2) = 109.0_r8/ft_to_m/100.0_r8 ! convert to cm
+    this%dead_fuel_sav(3) = 30.0_r8/ft_to_m/100.0_r8 ! convert to cm
+    this%live_fuel_sav(1) = live_herb_sav/ft_to_m/100.0_r8 ! convert to cm
+    this%live_fuel_sav(2) = live_woody_sav/ft_to_m/100.0_r8 ! convert to cm
     this%moist_extinct = moist_extinct/100.0_r8 ! convert to [m3/m3]
     
-    this%sum_fuel = this%hr1_loading + this%hr10_loading + this%hr100_loading
-    fine_fuel_loading = this%hr1_loading + this%live_herb_loading + this%hr10_loading + this%hr100_loading
-    this%bulk_density = (this%hr1_loading + this%live_herb_loading)/this%fuel_depth
+    this%bulk_density = (sum(this%dead_fuel_loading(:)) + sum(this%live_fuel_loading(:)))/this%fuel_depth
     
-    this%sav = (this%hr1_loading/fine_fuel_loading)*this%hr1_sav +                       &
-      (this%hr10_loading/fine_fuel_loading)*109.0_r8/ft_to_m/100.0_r8 +                  &
-      (this%hr100_loading/fine_fuel_loading)*30.0_r8/ft_to_m/100.0_r8 +                  &
-      (this%live_herb_loading/fine_fuel_loading)*this%live_herb_sav 
-      
-      
+    call this%CalculateWeightingFactors()
+    call this%CalculateSAV()
+    call this%CalculateNetFuelLoad(0.0555_r8)
+    
   end subroutine InitFuelModel
   
   ! --------------------------------------------------------------------------------------
   
-  subroutine CalculateMoisture(this, hr1_moisture, hr10_moisture, hr100_moisture,        & 
-    live_herb_moisture, live_woody_moisture, moisture)
+  subroutine CalculateHeatSink(this, bulk_density, heat_sink)
     !
     ! DESCRIPTION:
-    ! Calculates average fuel moisture for the synthetic fuel based on input values
+    ! Calculates the heat sink for the ROS equation as in Rothermel
     !
     
     ! ARGUMENTS:
     class(synthetic_fuel_model), intent(in)  :: this
+    real(r8),                    intent(in)  :: bulk_density
+    real(r8),                    intent(out) :: heat_sink
+    
+    ! LOCALS:
+    integer :: i
+    real(r8) :: heat_sink_live
+    real(r8) :: heat_sink_dead 
+    
+    heat_sink_dead = 0.0_r8 
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        heat_sink_dead = heat_sink_dead + this%dead_fuel_weighting(i)*(exp(-4.528_r8/this%dead_fuel_sav(i)))*this%q_ig_dead(i)
+      end if 
+    end do
+  
+    heat_sink_live = 0.0_r8 
+    do i = 1, 2
+      if (this%live_fuel_weighting(i) > 0.0_r8) then 
+        heat_sink_live = heat_sink_live + this%live_fuel_weighting(i)*(exp(-4.528_r8/this%live_fuel_sav(i)))*this%q_ig_live(i)
+      end if
+    end do
+    
+    heat_sink = bulk_density*(this%mean_weighting_dead*heat_sink_dead + this%mean_weighting_live*heat_sink_live)
+    
+  end subroutine CalculateHeatSink
+  
+  ! --------------------------------------------------------------------------------------
+
+  real(r8) function FuelSurfaceArea(load, sav, particle_density)
+    !
+    ! DESCRIPTION:
+    ! Calculates oven-dry fuel load, including noncombustable mineral fraction
+    !
+    
+    ! ARGUMENTS:
+    real(r8), intent(in) :: load             ! mean load of size class [kg/m2]
+    real(r8), intent(in) :: sav              ! surface are to volume ratio [/cm]
+    real(r8), intent(in) :: particle_density ! particle density [kg/m3]   
+    
+    FuelSurfaceArea = (sav*load)/particle_density
+  
+  end function FuelSurfaceArea
+  
+  ! --------------------------------------------------------------------------------------
+  
+  subroutine CalculateWeightingFactors(this)
+    !
+    ! DESCRIPTION:
+    ! Calculates fuel surface area and weighting factors
+    !
+    
+    ! ARGUMENTS:
+    class(synthetic_fuel_model), intent(inout) :: this
+    
+    ! LOCALS:
+    integer  :: i                    ! looping index
+    real(r8) :: surface_area_live(2) ! surface area of live fuels [m2]
+    real(r8) :: surface_area_dead(3) ! surface area of dead fuels [m2]
+    real(r8) :: mean_live_sa         ! mean surface area of live fuels [m2]
+    real(r8) :: mean_dead_sa         ! mean surface area of dead fuels [m2]
+    
+    mean_live_sa = 0.0_r8
+    mean_dead_sa = 0.0_r8
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        surface_area_dead(i) = FuelSurfaceArea(this%dead_fuel_loading(i),                  &
+          this%dead_fuel_sav(i), SF_val_part_dens)
+      else 
+        surface_area_dead(i) = 0.0_r8
+      end if
+      mean_dead_sa = mean_dead_sa + surface_area_dead(i)
+    end do 
+    do i = 1, 2
+      if (this%live_fuel_loading(i) > 0.0_r8) then 
+        surface_area_live(i) = FuelSurfaceArea(this%live_fuel_loading(i),                  &
+          this%live_fuel_sav(i), SF_val_part_dens)
+      else
+        surface_area_live(i) = 0.0_r8
+      end if
+      mean_live_sa = mean_live_sa + surface_area_live(i)
+    end do
+    
+    if (mean_dead_sa > 0.0_r8) then 
+      this%dead_fuel_weighting(:) = surface_area_dead(:)/mean_dead_sa
+    else
+      this%dead_fuel_weighting(:) = 0.0_r8 
+    end if 
+    if (mean_live_sa > 0.0_r8) then 
+      this%live_fuel_weighting(:) = surface_area_live(:)/mean_live_sa
+    else 
+      this%live_fuel_weighting(:) = 0.0_r8 
+    end if
+    
+    this%mean_live_surf_area = mean_live_sa
+    this%mean_dead_surf_area = mean_dead_sa
+    
+    ! calculate weighting factors for live and dead
+    this%mean_weighting_live = this%mean_live_surf_area/(this%mean_live_surf_area + this%mean_dead_surf_area)
+    this%mean_weighting_dead = this%mean_dead_surf_area/(this%mean_live_surf_area + this%mean_dead_surf_area)
+
+  end subroutine CalculateWeightingFactors
+  
+  ! --------------------------------------------------------------------------------------
+  
+  subroutine CalculateSAV(this)
+    !
+    ! DESCRIPTION:
+    ! Calculates fuel surface area and weighting factors
+    !
+    
+    ! ARGUMENTS:
+    class(synthetic_fuel_model), intent(inout) :: this
+    
+    ! LOCALS:
+    integer  :: i             ! looping index
+    real(r8) :: mean_live_sav ! mean surface area to volume ratio of live fuels [/cm]
+    real(r8) :: mean_dead_sav ! mean surface area to volume ratio of dead fuels [/cm]
+    real(r8) :: live_wf       ! live weighting factor
+    real(r8) :: dead_wf       ! dead weighting factor
+    
+
+    
+    ! aclculate surface-area-to-volume ratio of live and dead fuels
+    mean_live_sav = 0.0_r8
+    mean_dead_sav = 0.0_r8
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        mean_dead_sav = mean_dead_sav + this%dead_fuel_weighting(i)*this%dead_fuel_sav(i)
+      end if
+    end do 
+    do i = 1, 2
+      if (this%live_fuel_loading(i) > 0.0_r8) then 
+        mean_live_sav = mean_live_sav + this%live_fuel_weighting(i)*this%live_fuel_sav(i)
+      end if
+    end do
+    
+    ! calculate average surface area to volume ratio
+    this%sav = mean_dead_sav*this%mean_weighting_dead + mean_live_sav*this%mean_weighting_live
+    
+  end subroutine CalculateSAV
+  
+  ! --------------------------------------------------------------------------------------
+  
+  subroutine CalculateNetFuelLoad(this, mineral_fraction)
+    !
+    ! DESCRIPTION:
+    ! Calculates fuel surface area and weighting factors
+    !
+    
+    ! ARGUMENTS:
+    class(synthetic_fuel_model), intent(inout) :: this
+    real(r8),                    intent(in)    :: mineral_fraction ! total mineral content [fraction]
+    
+    ! LOCALS:
+    integer  :: i                  ! looping index
+    real(r8) :: net_fuel_live(2)   ! net fuel loading of live fuels [kg/m2]
+    real(r8) :: net_fuel_dead(3)   ! net fuel loading of dead fuels [kg/m2]
+    real(r8) :: total_live_loading ! total loading for live fuels [kg/m2]
+    real(r8) :: total_dead_loading ! total loading for dead fuels [kg/m2]
+    real(r8) :: weighting_factor
+    
+    total_dead_loading = 0.0_r8
+    total_live_loading = 0.0_r8
+    
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        net_fuel_dead(i) = this%dead_fuel_loading(i)*(1.0_r8 - mineral_fraction)
+        if (this%dead_fuel_sav(i) < 0.525_r8) then 
+          weighting_factor = 0.0_r8 
+        else 
+          weighting_factor = this%dead_fuel_weighting(i)
+        end if
+        total_dead_loading = total_dead_loading + net_fuel_dead(i)*weighting_factor
+      end if
+    end do
+    
+    do i = 1, 2
+      if (this%live_fuel_loading(i) > 0.0_r8) then 
+        net_fuel_live(i) = this%live_fuel_loading(i)*(1.0_r8 - mineral_fraction)
+        if (this%live_fuel_sav(i) < 0.525_r8) then 
+          weighting_factor = 0.0_r8 
+        else 
+          weighting_factor = this%live_fuel_weighting(i)
+        end if
+        total_live_loading = total_live_loading + net_fuel_live(i)*weighting_factor
+      end if
+    end do
+    
+    this%net_loading_live = total_live_loading
+    this%net_loading_dead = total_dead_loading
+    
+  end subroutine CalculateNetFuelLoad
+  
+  ! --------------------------------------------------------------------------------------
+
+  subroutine CalculateMoisture(this, hr1_moisture, hr10_moisture, hr100_moisture,        & 
+    live_herb_moisture, live_woody_moisture, live_moisture, dead_moisture, mef_live)
+    !
+    ! DESCRIPTION:
+    ! Calculates average fuel moisture and dead fuel moisture of extinction for the 
+    ! synthetic fuel based on input values
+    !
+    
+    ! ARGUMENTS:
+    class(synthetic_fuel_model), intent(inout)  :: this
     real(r8),                    intent(in)  :: hr1_moisture        ! 1-hr fuel moisture [%]
     real(r8),                    intent(in)  :: hr10_moisture       ! 10-hr fuel moisture [%]
     real(r8),                    intent(in)  :: hr100_moisture      ! 100-hr fuel moisture [%]
     real(r8),                    intent(in)  :: live_herb_moisture  ! live herb fuel moisture [%]
     real(r8),                    intent(in)  :: live_woody_moisture ! live woody fuel moisture [%]
-    real(r8),                    intent(out) :: moisture            ! average fuel moisture [m3/m3]
+    real(r8),                    intent(out) :: live_moisture       ! average live fuel moisture [m3/m3]
+    real(r8),                    intent(out) :: dead_moisture       ! average dead fuel moisture [m3/m3]
+    real(r8),                    intent(out) :: mef_live            ! average live fuel moisture of extinction [m3/m3]
     
-    moisture = (this%hr1_loading/this%sum_fuel)*(hr1_moisture/100.0_r8) +             &
-               (this%hr10_loading/this%sum_fuel)*(hr10_moisture/100.0_r8) +           &
-               (this%hr100_loading/this%sum_fuel)*(hr100_moisture/100.0_r8) 
+    ! LOCALS:
+    integer  :: i 
+    real(r8) :: dead_live_ratio
+    real(r8) :: fine_dead_moisture
+    real(r8) :: fine_dead_fuel_moisture_top
+    real(r8) :: fine_dead_fuel_moisture_bottom
+    real(r8) :: dead_moisture_all(3)
+    real(r8) :: live_moisture_all(2)
+    
+    call this%CalculateDeadLiveRatio(dead_live_ratio)
+
+    dead_moisture_all(1) = hr1_moisture/100.0_r8
+    dead_moisture_all(2) = hr10_moisture/100.0_r8
+    dead_moisture_all(3) = hr100_moisture/100.0_r8
+    live_moisture_all(1) = live_herb_moisture/100.0_r8
+    live_moisture_all(2) = live_woody_moisture/100.0_r8
+    
+    ! calculate average live and dead moisture
+    dead_moisture = 0.0_r8 
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        dead_moisture = dead_moisture + this%dead_fuel_weighting(i)*dead_moisture_all(i)
+      end if
+    end do
+    live_moisture = 0.0_r8 
+    do i = 1, 2
+      if (this%live_fuel_loading(i) > 0.0_r8) then 
+        live_moisture = live_moisture + this%live_fuel_weighting(i)*live_moisture_all(i)
+      end if
+    end do
+  
+    ! calculate live fuel moisture of extinction
+    fine_dead_fuel_moisture_top = 0.0_r8 
+    fine_dead_fuel_moisture_bottom = 0.0_r8
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        fine_dead_fuel_moisture_top = fine_dead_fuel_moisture_top +                        &
+          dead_moisture_all(i)*this%dead_fuel_loading(i)*exp(-4.528/this%dead_fuel_sav(i))
+        fine_dead_fuel_moisture_bottom = fine_dead_fuel_moisture_bottom +                  &
+          this%dead_fuel_loading(i)*exp(-4.528/this%dead_fuel_sav(i))
+      end if
+    end do
+    
+    fine_dead_moisture = fine_dead_fuel_moisture_top/fine_dead_fuel_moisture_bottom
+    mef_live = 2.9_r8*dead_live_ratio*(1.0_r8 - fine_dead_moisture/this%moist_extinct) - 0.226_r8
+    if (mef_live < this%moist_extinct) mef_live = this%moist_extinct
+    
+    ! calculate qig
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then 
+        this%q_ig_dead(i) =  581.0_r8 + 2594.0_r8*dead_moisture_all(i)
+      else 
+        this%q_ig_dead(i) = 0.0_r8
+      end if
+    end do
+    do i = 1, 2
+      if (this%live_fuel_loading(i) > 0.0_r8) then 
+        this%q_ig_live(i) =  581.0_r8 + 2594.0_r8*live_moisture_all(i)
+      else 
+        this%q_ig_live(i) = 0.0_r8 
+      end if
+    end do
     
   end subroutine CalculateMoisture
+  
+  ! --------------------------------------------------------------------------------------
+  
+  subroutine CalculateDeadLiveRatio(this, dead_live_ratio)
+    !
+    ! DESCRIPTION:
+    ! Calculates dead:live ratio of fuel
+    !
+    
+    ! ARGUMENTS:
+    class(synthetic_fuel_model), intent(in)  :: this
+    real(r8),                    intent(out) :: dead_live_ratio
+    
+    ! LOCALS:
+    integer  :: i                  ! looping index
+    real(r8) :: live_loading       ! live fuel loading, weighted by SAV 
+    real(r8) :: dead_loading       ! dead fuel loading, weighted by SAV
+    
+    ! calculate dead:live ratio
+    dead_loading = 0.0_r8 
+    live_loading = 0.0_r8
+    do i = 1, 3
+      if (this%dead_fuel_loading(i) > 0.0_r8) then
+        dead_loading = dead_loading + this%dead_fuel_weighting(i)*exp(-4.528*this%dead_fuel_sav(i))
+      end if
+    end do 
+    
+    do i = 1, 2
+      if (this%live_fuel_loading(i) > 0.0_r8) then
+        live_loading = live_loading + this%live_fuel_weighting(i)*exp(-16.4_r8*this%live_fuel_sav(i))
+      end if
+    end do
+    
+    if (live_loading > 0.0_r8) then 
+      dead_live_ratio = dead_loading/live_loading
+    else
+      dead_live_ratio = 0.0_r8 
+    end if
+    
+  end subroutine CalculateDeadLiveRatio
   
   ! --------------------------------------------------------------------------------------
     
@@ -258,9 +572,9 @@ module SyntheticFuelModels
     ! grasslands/savanna are represented along with stubble, grass tundra, grass-shrub combinations
     ! annual and perennial grasses are included fuels
     call this%AddFuelModel(fuel_model_index=1, carrier='GR', fuel_model_name='short grass',     &
-      wind_adj_factor=0.36_r8, hr1_loading=0.7_r8, hr10_loading=0.0_r8, hr100_loading=0.0_r8,   &
+      wind_adj_factor=0.36_r8, hr1_loading=0.74_r8, hr10_loading=0.0_r8, hr100_loading=0.0_r8,   &
       live_herb_loading=0.0_r8, live_woody_loading=0.0_r8, fuel_depth=1.0_r8,                   &
-      hr1_sav=3500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=12.0_r8)
+      hr1_sav=3500.0_r8, live_herb_sav=0.0_r8, live_woody_sav=0.0_r8, moist_extinct=30.0_r8)
       
     ! fire spread primarily through herbaceous fuels, either curing or dead
     ! surface fires
