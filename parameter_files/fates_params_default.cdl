@@ -1751,7 +1751,7 @@ data:
 
  fates_fire_nignitions = 15 ;
 
- fates_fire_part_dens = 513 ;
+ fates_fire_part_dens = 512.6 ;
 
  fates_fire_threshold = 50 ;
 

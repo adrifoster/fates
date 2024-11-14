@@ -45,7 +45,7 @@ program FatesTestROS
   
   ! CONSTANTS:
   character(len=*), parameter               :: out_file = 'ros_out.nc' ! output file 
-  integer,          parameter, dimension(5) :: fuel_models = (/101, 102, 103, 104, 105/)   ! fuel models to test
+  integer,          parameter, dimension(6) :: fuel_models = (/4, 101, 102, 103, 104, 105/)   ! fuel models to test
   
   ! fuel moisture values to test - from Scott & Bergen 2005
   real(r8),         parameter, dimension(4) :: fuel_moisture_1hr =                       &
@@ -108,8 +108,8 @@ program FatesTestROS
     do m = 1, num_moist
 
       call fuel_models_array%fuel_models(f)%CalculateMoisture(fuel_moisture_1hr(m),      &
-        fuel_moisture_10hr(m), fuel_moisture_100hr(m), fuel_moisture_live_herb(m),       &
-        fuel_moisture_live_woody(m), fuel_moisture_live(f,m), fuel_moisture_dead(f,m),   &
+        fuel_moisture_10hr(m), fuel_moisture_100hr(m), fuel_moisture_live_herb(2),       &
+        fuel_moisture_live_woody(2), fuel_moisture_live(f,m), fuel_moisture_dead(f,m),   &
         mef_live(f,m))
         
       i_r(f,m) = ReactionIntensity(fuel_models_array%fuel_models(f)%net_loading_dead,      &

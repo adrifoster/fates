@@ -249,7 +249,7 @@ contains
    
   !---------------------------------------------------------------------------------------
   
-  real(r8) function PhiWind(wind_speed, beta_ratio, SAV)
+  real(r8) function PhiWind(wind_speed, beta_ratio, SAV, reaction_intensity)
     !
     !  DESCRIPTION:
     !  Calculates the wind coefficient for rate of spread [unitless]
@@ -257,13 +257,23 @@ contains
     !
     
     ! ARGUMENTS:
-    real(r8), intent(in) :: wind_speed ! wind speed [m/min]
-    real(r8), intent(in) :: beta_ratio ! ratio of packing ratio to optimum packing ratio [unitless]
-    real(r8), intent(in) :: SAV        ! fuel surface area to volume ratio [/cm]
+    real(r8), intent(in) :: wind_speed         ! wind speed [m/min]
+    real(r8), intent(in) :: beta_ratio         ! ratio of packing ratio to optimum packing ratio [unitless]
+    real(r8), intent(in) :: SAV                ! fuel surface area to volume ratio [/cm]
+    real(r8), intent(in) :: reaction_intensity ! reaction intensity [kJ/m2/min]
     
     ! LOCALS:
-    real(r8) :: b, c, e ! intermediate variables
+    real(r8) :: b, c, e             ! intermediate variables
+    real(r8) :: wind_limit          ! wind limit [m/min]
+    real(r8) :: wind_speed_modified ! modified wind speed
     
+    ! CONSTANTS:
+    real(r8), parameter :: limit_scalar = 96.8_r8 !1099.32_r8
+    real(r8) :: reaction_intensity_btu
+    
+    reaction_intensity_btu = reaction_intensity*0.947817_r8/10.7639_r8
+    wind_limit = (limit_scalar*reaction_intensity_btu**(1.0_r8/3.0_r8))*0.3048_r8
+   
     ! intermediate variables
     
     ! Equation A7 in Thonicke et al. 2010 per eqn 49 from Rothermel 1972
@@ -276,7 +286,16 @@ contains
     ! appears to have typo, using coefficient Eq. 50 Rothermel 1972
     e = 0.715_r8*(exp(-0.01094_r8*SAV))
     
-    PhiWind = c*((3.281_r8*wind_speed)**b)*(beta_ratio**(-e))
+    ! calculate wind limit
+    !wind_limit = limit_scalar*(reaction_intensity**(1.0_r8/3.0_r8))
+    
+    if (wind_speed > wind_limit) then
+      wind_speed_modified = wind_limit
+    else 
+      wind_speed_modified = wind_speed
+    end if
+    
+    PhiWind = c*((3.281_r8*wind_speed_modified)**b)*(beta_ratio**(-e))
   
   end function PhiWind
   
@@ -286,7 +305,7 @@ contains
     !
     !  DESCRIPTION:
     !  Calculates propagating flux for ROS equation [unitless]
-    !  From Equation A2 in Thonicke et al.2010 and Eq. 42 Rothermel 1972
+    !  From Equation A2 in Thonicke et al. 2010 and Eq. 42 Rothermel 1972
     !
     
     ! ARGUMENTS:
@@ -361,12 +380,14 @@ contains
     ! moist_damp is unitless
     MoistureCoefficient = max(0.0_r8, (1.0_r8 - (2.59_r8*mw_weight) +                    &
       (5.11_r8*(mw_weight**2.0_r8)) - (3.52_r8*(mw_weight**3.0_r8))))
+   if (MoistureCoefficient > 1.0_r8) MoistureCoefficient = 1.0_r8
     
   end function MoistureCoefficient
    
   !---------------------------------------------------------------------------------------
   
-  real(r8) function ReactionIntensity(fuel_loading, SAV, beta_ratio, moisture, MEF)
+  real(r8) function ReactionIntensity(fuel_loading_dead, fuel_loading_live, SAV,         &
+   beta_ratio, moisture_dead, moisture_live, MEF_dead, MEF_live)
     !
     !  DESCRIPTION:
     !  Calculates reaction intensity in kJ/m2/min
@@ -376,16 +397,21 @@ contains
     use SFParamsMod, only : SF_val_fuel_energy, SF_val_miner_damp
     
     ! ARGUMENTS:
-    real(r8), intent(in) :: fuel_loading ! fuel loading [kgC/m2]
-    real(r8), intent(in) :: SAV          ! fuel surface area to volume ratio [/cm]
-    real(r8), intent(in) :: beta_ratio   ! ratio of packing ratio to optimum packing ratio [0-1]
-    real(r8), intent(in) :: moisture     ! fuel moisture [m3/m3]
-    real(r8), intent(in) :: MEF          ! fuel moisture of extinction [m3/m3]
+    real(r8), intent(in) :: fuel_loading_dead ! net fuel loading of dead fuels [kg/m2]
+    real(r8), intent(in) :: fuel_loading_live ! net fuel loading of live fuels [kg/m2]
+    real(r8), intent(in) :: SAV               ! fuel surface area to volume ratio [/cm]
+    real(r8), intent(in) :: beta_ratio        ! ratio of packing ratio to optimum packing ratio [0-1]
+    real(r8), intent(in) :: moisture_dead     ! dead fuel moisture [m3/m3]
+    real(r8), intent(in) :: moisture_live     ! live fuel moisture [m3/m3]
+    real(r8), intent(in) :: MEF_dead          ! dead fuel moisture of extinction [m3/m3]
+    real(r8), intent(in) :: MEF_live          ! dead fuel moisture of extinction [m3/m3]
     
     ! LOCALS:
-    real(r8) :: max_reaction_vel ! maximum reaction velocity
-    real(r8) :: opt_reaction_vel ! optimum reaction velocity
-    real(r8) :: moist_coeff      ! moisture dampening coefficient [0-1]
+    real(r8) :: max_reaction_vel     ! maximum reaction velocity
+    real(r8) :: opt_reaction_vel     ! optimum reaction velocity
+    real(r8) :: moist_coeff_dead     ! dead moisture dampening coefficient [0-1]
+    real(r8) :: moist_coeff_live     ! live moisture dampening coefficient [0-1]
+    real(r8) :: live_part, dead_part ! temporary variables
     
     ! calculate maximum reaction velocity [/min]
     max_reaction_vel = MaximumReactionVelocity(SAV)
@@ -394,11 +420,14 @@ contains
     opt_reaction_vel = OptimumReactionVelocity(max_reaction_vel, SAV, beta_ratio)
     
     ! calculate moisture dampening coefficient [0-1]
-    moist_coeff = MoistureCoefficient(moisture, MEF)
+    moist_coeff_dead = MoistureCoefficient(moisture_dead, MEF_dead)
+    moist_coeff_live = MoistureCoefficient(moisture_live, MEF_live)
     
     ! note fuel loading converted from kgC/m2 to kg/m2 
-    ReactionIntensity = opt_reaction_vel*(fuel_loading)*SF_val_fuel_energy*      &
-      moist_coeff*SF_val_miner_damp 
+    live_part = fuel_loading_live*SF_val_fuel_energy*moist_coeff_live*SF_val_miner_damp
+    dead_part = fuel_loading_dead*SF_val_fuel_energy*moist_coeff_dead*SF_val_miner_damp
+    
+    ReactionIntensity = opt_reaction_vel*(live_part + dead_part)
 
   end function ReactionIntensity
    
@@ -472,10 +501,6 @@ contains
         ! effective heating number [unitless]
         eps = EffectiveHeatingNumber(currentPatch%fuel%SAV_notrunks)
 
-        ! calculate wind coefficient [unitless]
-        phi_wind = PhiWind(currentSite%fireWeather%effective_windspeed, beta_ratio,      &
-          currentPatch%fuel%SAV_notrunks)
-
         ! calculate propagating flux [unitless]
         prop_flux = PropagatingFlux(currentPatch%fuel%SAV_notrunks, beta)
 
@@ -484,12 +509,17 @@ contains
         ! remove mineral content from net fuel load per Thonicke 2010
         non_mineral_loading = currentPatch%fuel%non_trunk_loading*(1.0_r8 - SF_val_miner_total) 
         
-        i_r = ReactionIntensity(non_mineral_loading, currentPatch%fuel%SAV_notrunks,     &
-          beta_ratio, currentPatch%fuel%average_moisture_notrunks, currentPatch%fuel%MEF_notrunks)
-
+        !i_r = ReactionIntensity(non_mineral_loading, currentPatch%fuel%SAV_notrunks,     &
+        !  beta_ratio, currentPatch%fuel%average_moisture_notrunks, currentPatch%fuel%MEF_notrunks)
+        
+        ! calculate wind coefficient [unitless]
+        phi_wind = PhiWind(currentSite%fireWeather%effective_windspeed, beta_ratio,      &
+          currentPatch%fuel%SAV_notrunks, 0.0_r8)
+          
+      
         ! rate of forward spread
         currentPatch%ROS_front = RateOfSpread(currentPatch%fuel%bulk_density_notrunks,   &
-          eps, q_ig, i_r, prop_flux, phi_wind)
+          eps, q_ig, 0.0_r8, prop_flux, phi_wind)
 
         ! Equation 10 in Thonicke et al. 2010
         ! backward ROS from Can FBP System (1992) in m/min
