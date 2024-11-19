@@ -1545,7 +1545,7 @@ contains
        nscaler,       &
        ft,            &
        veg_tempk,     &
-       lmr)
+       lmr, btran)
 
     
     
@@ -1564,6 +1564,7 @@ contains
     integer,  intent(in)  :: ft           ! (plant) Functional Type Index
     real(r8), intent(in)  :: veg_tempk    ! vegetation temperature
     real(r8), intent(out) :: lmr          ! Leaf Maintenance Respiration  (umol CO2/m**2/s)
+    real(r8), intent(in) :: btran
 
     ! Locals
     real(r8) :: lmr25   ! leaf layer: leaf maintenance respiration rate at 25C (umol CO2/m**2/s)
@@ -1597,7 +1598,7 @@ contains
     endif
 
     ! Any hydrodynamic limitations could go here, currently none
-    ! lmr = lmr * (nothing)
+    lmr = lmr * (btran)
 
   end subroutine LeafLayerMaintenanceRespiration_Ryan_1991
 
@@ -1608,7 +1609,7 @@ contains
        ft,             &
        veg_tempk,      &
        tgrowth,        &
-       lmr)
+       lmr, btran)
 
    
 
@@ -1619,6 +1620,7 @@ contains
     real(r8), intent(in)  :: veg_tempk        ! vegetation temperature  (degrees K)
     real(r8), intent(in)  :: tgrowth          ! lagged vegetation temperature averaged over acclimation timescale (degrees K)
     real(r8), intent(out) :: lmr              ! Leaf Maintenance Respiration  (umol CO2/m**2/s)
+    real(r8), intent(in) :: btran
     
     
     ! Locals
@@ -1655,6 +1657,8 @@ contains
 
     lmr = r_t_ref * exp(lmr_b * (veg_tempk - tfrz - lmr_TrefC) + lmr_c * &
          ((veg_tempk-tfrz)**2 - lmr_TrefC**2))
+         
+    lmr = lmr*btran
 
   end subroutine LeafLayerMaintenanceRespiration_Atkin_etal_2017
 

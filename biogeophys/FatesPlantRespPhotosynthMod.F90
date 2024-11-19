@@ -596,7 +596,7 @@ contains
                                          nscaler,                  &  ! in
                                          ft,                       &  ! in
                                          bc_in(s)%t_veg_pa(ifp),   &  ! in
-                                         lmr_z(iv,ft,cl))             ! out
+                                         lmr_z(iv,ft,cl), btran_eff)             ! out
 
                                  case (lmrmodel_atkin_etal_2017)
 
@@ -619,7 +619,7 @@ contains
                                          ft,                                 &  ! in
                                          bc_in(s)%t_veg_pa(ifp),             &  ! in
                                          currentPatch%tveg_lpa%GetMean(),    &  ! in
-                                         lmr_z(iv,ft,cl))                       ! out
+                                         lmr_z(iv,ft,cl), btran_eff)                       ! out
 
                                  case default
 
