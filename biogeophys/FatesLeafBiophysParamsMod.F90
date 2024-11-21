@@ -199,7 +199,7 @@ contains
     !deallocate(tmpreal)
 
     ! BTRAN affects stomatal slope only
-    lb_params%stomatal_btran_model(:) = btran_on_gs_gs0
+    lb_params%stomatal_btran_model(:) = btran_on_gs_gs1
     
     !name = 'fates_leaf_agross_btran_model'
     !call fates_params%RetrieveParameterAllocate(name=name, &
@@ -209,7 +209,7 @@ contains
     !deallocate(tmpreal)
     
      ! BTRAN does not affect vcmax or jmax
-    lb_params%agross_btran_model(:) = btran_on_ag_vcmax
+    lb_params%agross_btran_model(:) = btran_on_ag_none !btran_on_ag_vcmax
     
     name = 'fates_leaf_stomatal_slope_medlyn'
     call fates_params%RetrieveParameterAllocate(name=name, &

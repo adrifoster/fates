@@ -301,6 +301,7 @@ contains
     ! Trivial case (gsb near 0)
     if(gs2<0.01_r8) then
        gs = gs0
+       return
     end if
     
     ! Trivial case (gs1 near 0)
@@ -1124,7 +1125,7 @@ contains
     real(r8),parameter :: init_a2l_co2_c4 = 0.4_r8
 
     ! For testing, it is useful to force the bisection method
-    logical, parameter :: force_bisection = .true.
+    logical, parameter :: force_bisection = .false.
 
     ! Maximum number of iterations on intracelluar co2 solver until is quits
     integer, parameter :: max_iters = 10
@@ -1612,7 +1613,7 @@ contains
     endif
 
     ! Any hydrodynamic limitations could go here, currently none
-    lmr = lmr * (btran)
+    !lmr = lmr * (btran)
 
   end subroutine LeafLayerMaintenanceRespiration_Ryan_1991
 
@@ -1672,7 +1673,7 @@ contains
     lmr = r_t_ref * exp(lmr_b * (veg_tempk - tfrz - lmr_TrefC) + lmr_c * &
          ((veg_tempk-tfrz)**2 - lmr_TrefC**2))
          
-    lmr = lmr*btran
+    !lmr = lmr*btran
 
   end subroutine LeafLayerMaintenanceRespiration_Atkin_etal_2017
 
