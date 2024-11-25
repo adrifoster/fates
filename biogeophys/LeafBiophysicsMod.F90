@@ -76,6 +76,7 @@ module LeafBiophysicsMod
   ! maximum stomatal resistance [s/m] (used across several procedures)
   real(r8),public, parameter :: rsmax0 =  2.e8_r8
 
+  ! for non cuticular (ie through branches)
   ! minimum allowable stomatal conductance for numerics purposes [m/s]
   real(r8),parameter :: gsmin0 = 1._r8/rsmax0
 
@@ -137,6 +138,11 @@ module LeafBiophysicsMod
   real(r8),parameter :: theta_ip_c4 = 0.95_r8  !0.95 is from Collatz 91, 0.999 was api 36
   real(r8),parameter :: theta_cj_c4 = 0.98_r8  !0.98 from Collatz 91,  0.099 was api 36
 
+
+  ! There is a minimum stomatal conductance, below which we just don't
+  ! allow, this is well below reasonable ranges of cuticular conductance
+  real(r8),parameter :: gs0_min = 100.0_r8
+  
   
   ! Set this to true to match results with main
   logical, parameter :: base_compare_revert = .false.
@@ -298,7 +304,7 @@ contains
        return
     end if
 
-    ! Trivial case (gsb near 0)
+    ! Trivial case (gs2 near 0)
     if(gs2<0.01_r8) then
        gs = gs0
        return
@@ -321,7 +327,7 @@ contains
     gs = max(r1,r2)
 
     if(err)then
-       write(fates_log(),*) "medquadfail:",anet,veg_esat,can_vpress,gs0,gs1,leaf_co2_ppress,can_press
+       write(fates_log(),*) "medquadfail:",anet,veg_esat,can_vpress,gs0,gs1,gs2,leaf_co2_ppress,can_press
        call endrun(msg=errMsg(sourcefile, __LINE__))
     end if
     
@@ -553,9 +559,11 @@ contains
     ! These are compound terms used to solve the equation that balances
     ! net assimilation with the gradient flux equation
     real(r8) :: a,b,c,d,e,f,g
+    real(r8) :: ap,ac,aj,ai
     real(r8) :: Je                ! Electron tranport rate (umol e/m2/s)
     real(r8) :: rmin ,rmax        ! Maximum and minimum resistance [s/umol h2o/m2]
-    
+    real(r8) :: aquad,bquad,cquad,r1,r2
+    logical :: err
     
     ! Minimum possible resistance (with a little buffer)
     rmin = 0.75_r8*h2o_co2_bl_diffuse_ratio/gb
@@ -568,21 +576,119 @@ contains
        
        ag(1) = vcmax
        ag(2) = AgrossRuBPC4(par_abs)
+
+       ! C4: Rubisco-limited photosynthesis
+       ac = vcmax
+       
+       ! C4: RuBP-limited photosynthesis
+       aj = AgrossRuBPC4(par_abs)
+       
+       !! C4: PEP carboxylase-limited (CO2-limited)
+       !ap = AgrossPEPC4(ci,kp,can_press)
+       
+       aquad = theta_cj_c4
+       bquad = -(ac + aj)
+       cquad = ac * aj
+       call QuadraticRoots(aquad, bquad, cquad, r1, r2,err)
+       if(err)then
+          write(fates_log(),*) "c41quadfail_minmax1:",par_abs,can_press,vcmax
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       ai = min(r1,r2)
+
+       a = rmin*can_press
+       
+       aquad = theta_ip_c4/a**2.0_r8 + kp/(can_press*a)
+       bquad = - theta_ip_c4*2.0_r8*can_co2_ppress/(a*a) &
+               - theta_ip_c4*2._r8*lmr/a &
+               - kp*lmr/can_press &
+               + ai/a &
+               - kp*can_co2_ppress/(can_press*a) &
+               + ai*kp/can_press
+       cquad = theta_ip_c4*can_co2_ppress*can_co2_ppress/(a*a) &
+             + 2._r8*lmr*can_co2_ppress*theta_ip_c4/a  &
+             + theta_ip_c4*lmr*lmr &
+             - ai*can_co2_ppress/a &
+             - ai*lmr
+
+       call QuadraticRoots(aquad, bquad, cquad, r1, r2,err)
+       if(err)then
+          write(fates_log(),*) "c41quadfail_minmax2:",par_abs,can_press,vcmax
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+
+       ci(3) = max(r1,r2)
+
+       ap = kp*ci(3)/can_press
+
+       aquad = theta_ip_c4
+       bquad = -(ai + ap)
+       cquad = ai * ap
+       call QuadraticRoots(aquad, bquad, cquad, r1, r2,err)
+       if(err)then
+          write(fates_log(),*) "c42quadfail:",par_abs,ci,kp,can_press,vcmax
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       ag(:) = min(r1,r2)
+
+       if(debug) then
+          if( abs(ci(3)-(can_co2_ppress - (ag(3)-lmr)*can_press*rmin))>0.001_r8) then
+             write(fates_log(),*) "c4 ci conv check fail"
+             call endrun(msg=errMsg(sourcefile, __LINE__))
+          end if
+       end if
+       
+       
        ci(1) = can_co2_ppress - (ag(1)-lmr)*can_press*rmin
-       ci(2) = can_co2_ppress - (ag(2)-lmr)*can_press*rmin
-       ci(3) = (can_co2_ppress + lmr*can_press*rmin)/(1._r8 + kp*rmin) 
-       ag(3) = AgrossPEPC4(ci(3),kp,can_press)
+       ci(2) = can_co2_ppress - (ag(1)-lmr)*can_press*rmin
        
        ci_max = ci(minloc(ag,DIM=1))
 
        ! Minimum conductance (maximum resistance)
+
+       a = rmax*can_press
        
-       !ag(1) = vcmax                  ! no need to recompute
-       !ag(2) = AgrossRuBPC4(par_abs)  ! no need to recompute
+       aquad = theta_ip_c4/a**2.0_r8 + kp/(can_press*a)
+       bquad = - theta_ip_c4*2.0_r8*can_co2_ppress/(a*a) &
+               - theta_ip_c4*2._r8*lmr/a &
+               - kp*lmr/can_press &
+               + ai/a &
+               - kp*can_co2_ppress/(can_press*a) &
+               + ai*kp/can_press
+       cquad = theta_ip_c4*can_co2_ppress*can_co2_ppress/(a*a) &
+             + 2._r8*lmr*can_co2_ppress*theta_ip_c4/a  &
+             + theta_ip_c4*lmr*lmr &
+             - ai*can_co2_ppress/a &
+             - ai*lmr
+
+       call QuadraticRoots(aquad, bquad, cquad, r1, r2,err)
+       if(err)then
+          write(fates_log(),*) "c41quadfail_minmax2:",par_abs,can_press,vcmax
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       ci(3) = max(r1,r2)
+
+       ap = kp*ci(3)/can_press
+
+       aquad = theta_ip_c4
+       bquad = -(ai + ap)
+       cquad = ai * ap
+       call QuadraticRoots(aquad, bquad, cquad, r1, r2,err)
+       if(err)then
+          write(fates_log(),*) "c42quadfail:",par_abs,ci,kp,can_press,vcmax
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       ag(:) = min(r1,r2)
+       
        ci(1) = can_co2_ppress - (ag(1)-lmr)*can_press*rmax
-       ci(2) = can_co2_ppress - (ag(2)-lmr)*can_press*rmax 
-       ci(3) = (can_co2_ppress + lmr*can_press*rmax  )/(1._r8 + kp*rmax)
-       ag(3) = AgrossPEPC4(ci(3),kp,can_press)
+       ci(2) = can_co2_ppress - (ag(1)-lmr)*can_press*rmax
+
+       if(debug) then
+          if( abs(ci(3)-(can_co2_ppress - (ag(3)-lmr)*can_press*rmax))>0.001_r8) then
+             write(fates_log(),*) "c4 ci conv check fail"
+             call endrun(msg=errMsg(sourcefile, __LINE__))
+          end if
+       end if
        
        ci_min = ci(minloc(ag,DIM=1))
 
@@ -958,22 +1064,40 @@ contains
          gs0,gs1,gs2, &
          anet,agross,gs,fval_l)
 
-         
     ! It is necessary that our starting points are on opposite sides of the root
-    
     if( nint(fval_h/abs(fval_h)) .eq. nint(fval_l/abs(fval_l)) ) then
-       print*,ci_h,fval_h,ci_l,fval_l
-       write(fates_log(),*) 'While attempting bisection for Ci calculations,'
-       write(fates_log(),*) 'the two starting values for Ci were on the same'
-       write(fates_log(),*) 'side of the root. Try increasing and decreasing'
-       write(fates_log(),*) 'init_ci_high and init_ci_low respectively'
-       write(fates_log(),*) "ci_h=",ci_h,"fval_h=",fval_h,"ci_l=",ci_l,"fval_l=",fval_l
-       write(fates_log(),*) "ft= ",ft,"vcmax=",vcmax,"jmax=",jmax,"kp=",kp
-       write(fates_log(),*) "co2_cpoint=",co2_cpoint,"mm_kco2=",mm_kco2,"mm_ko2=",mm_ko2
-       write(fates_log(),*) "can_co2_ppress=",can_co2_ppress,"can_o2_ppress=",can_o2_ppress,"can_press=",can_press
-       write(fates_log(),*) "can_vpress=",can_vpress,"lmr=",lmr,"par_abs=",par_abs,"gb=",gb
-       write(fates_log(),*) "veg_tempk=",veg_tempk,"gs0=",gs0,"gs1=",gs1,"gs2=",gs2,"ci_tol=",ci_tol
-       call endrun(msg=errMsg(sourcefile, __LINE__))
+       
+       ! Try an exteremly large bisection range, if this doesn't work, then
+       ! fail the run
+       ci_h = 0.1_r8
+       call CiFunc(ci_h, &
+            ft,vcmax,jmax,kp,co2_cpoint,mm_kco2,mm_ko2, &
+            can_co2_ppress,can_o2_ppress,can_press,can_vpress,lmr,par_abs,gb,veg_tempk, &
+            gs0,gs1,gs2, & 
+            anet,agross,gs,fval_h)
+
+       ci_l = 2000._r8
+       call CiFunc(ci_l, &
+         ft,vcmax,jmax,kp,co2_cpoint,mm_kco2,mm_ko2, &
+         can_co2_ppress,can_o2_ppress,can_press,can_vpress,lmr,par_abs,gb,veg_tempk, &
+         gs0,gs1,gs2, &
+         anet,agross,gs,fval_l)
+       
+       ! It is necessary that our starting points are on opposite sides of the root
+       if( nint(fval_h/abs(fval_h)) .eq. nint(fval_l/abs(fval_l)) ) then
+          write(fates_log(),*)'While attempting bisection for Ci calculations,'
+          write(fates_log(),*)'the two starting values for Ci were on the same'
+          write(fates_log(),*)'side of the root. Try increasing and decreasing'
+          write(fates_log(),*)'init_ci_high and init_ci_low respectively'
+          write(fates_log(),*) "ci_h=",ci_h,"fval_h=",fval_h,"ci_l=",ci_l,"fval_l=",fval_l
+          write(fates_log(),*) "ft= ",ft,"is c3psn:",lb_params%c3psn(ft) == c3_path_index
+          write(fates_log(),*) "vcmax=",vcmax,"jmax=",jmax,"kp=",kp
+          write(fates_log(),*) "co2_cpoint=",co2_cpoint,"mm_kco2=",mm_kco2,"mm_ko2=",mm_ko2
+          write(fates_log(),*) "can_co2_ppress=",can_co2_ppress,"can_o2_ppress=",can_o2_ppress,"can_press=",can_press
+          write(fates_log(),*) "can_vpress=",can_vpress,"lmr=",lmr,"par_abs=",par_abs,"gb=",gb
+          write(fates_log(),*) "veg_tempk=",veg_tempk,"gs0=",gs0,"gs1=",gs1,"gs2=",gs2,"ci_tol=",ci_tol
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
     end if
 
     loop_continue = .true.
@@ -1852,9 +1976,9 @@ contains
     if(lb_params%stomatal_btran_model(ft)==btran_on_gs_gs0  .or. &
        lb_params%stomatal_btran_model(ft)==btran_on_gs_gs01 .or. &
        lb_params%stomatal_btran_model(ft)==btran_on_gs_gs02 )then
-       gs0 = max(gsmin0_20C1A_mol,lb_params%stomatal_intercept(ft)*btran)
+       gs0 = max(gs0_min,lb_params%stomatal_intercept(ft)*btran)
     else
-       gs0 = max(gsmin0_20C1A_mol,lb_params%stomatal_intercept(ft))
+       gs0 = max(gs0_min,lb_params%stomatal_intercept(ft))
     end if
 
     ! Apply water limitations to stomatal slope (hypothesis dependent)
