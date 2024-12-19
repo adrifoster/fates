@@ -7,6 +7,7 @@ module FatesLeafBiophysParamsMod
   use FatesGlobals,   only : endrun => fates_endrun
   use shr_log_mod      , only : errMsg => shr_log_errMsg
   use LeafBiophysicsMod, only : lb_params,btran_on_gs_gs1,btran_on_ag_none
+  use LeafBiophysicsMod, only : btran_on_gs_gs0, btran_on_ag_vcmax
   use FatesParametersInterface, only : fates_parameters_type
   ! Register the parameters we want the host to provide, and
   ! indicate whether they are fates parameters or host parameters
@@ -198,7 +199,7 @@ contains
     !deallocate(tmpreal)
 
     ! BTRAN affects stomatal slope only
-    lb_params%stomatal_btran_model(:) = btran_on_gs_gs1
+    lb_params%stomatal_btran_model(:) = btran_on_gs_gs0
     
     !name = 'fates_leaf_agross_btran_model'
     !call fates_params%RetrieveParameterAllocate(name=name, &
@@ -208,7 +209,7 @@ contains
     !deallocate(tmpreal)
     
      ! BTRAN does not affect vcmax or jmax
-    lb_params%agross_btran_model(:) = btran_on_ag_none
+    lb_params%agross_btran_model(:) = btran_on_ag_vcmax
     
     name = 'fates_leaf_stomatal_slope_medlyn'
     call fates_params%RetrieveParameterAllocate(name=name, &
