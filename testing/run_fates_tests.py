@@ -462,7 +462,7 @@ def check_arg_validity(args):
         if args.verbose_make:
             raise argparse.ArgumentError(None, "Can't run verbose make and skip build.\n" 
                                          "Re-run script without --skip-build")
-        check_build_dir(args.build_dir, args.test_dict)
+        #check_build_dir(args.build_dir, args.test_dict)
 
     # make sure relevant output files exist:
     if args.skip_run_executables:
