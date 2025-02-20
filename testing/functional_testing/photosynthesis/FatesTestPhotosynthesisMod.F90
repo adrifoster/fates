@@ -64,7 +64,7 @@ module FatesTestPhotosynthesisMod
       stop
     end if
     
-    sat_vapor_press = 100.0*(a(0) + temperature*(a(1) + temperature*(a(2) +                &
+    sat_vapor_press = 100.0_r8*(a(0) + temperature*(a(1) + temperature*(a(2) +                &
       temperature*(a(3) + temperature*(a(4) + temperature*(a(5) + temperature *(a(6) +   &
       temperature*(a(7) + temperature*a(8)))))))))
   

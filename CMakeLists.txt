@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.4)
 
 list(APPEND CMAKE_MODULE_PATH ${CIME_CMAKE_MODULE_DIRECTORY})
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../share/cmake")
 
 FIND_PATH(NETCDFC_FOUND libnetcdf.a ${NETCDF_C_DIR}/lib)
 FIND_PATH(NETCDFF_FOUND libnetcdff.a ${NETCDF_FORTRAN_DIR}/lib)
@@ -57,6 +58,14 @@ endforeach()
 # "shr_cal_mod.F90")
 foreach (sourcefile ${share_sources})
   string(REGEX MATCH "shr_cal_mod.F90" match_found ${sourcefile})
+  if(match_found)
+    list(REMOVE_ITEM share_sources ${sourcefile})
+  endif()
+endforeach()
+
+# Remove shr_pio_mod from share_sources.
+foreach (sourcefile ${share_sources})
+  string(REGEX MATCH "shr_pio_mod.F90" match_found ${sourcefile})
   if(match_found)
     list(REMOVE_ITEM share_sources ${sourcefile})
   endif()

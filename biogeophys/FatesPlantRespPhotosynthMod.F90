@@ -1334,7 +1334,7 @@ subroutine LeafLayerPhotosynthesis(f_sun_lsl,         &  ! in
 
   ! quantum efficiency, used only for C4 (mol CO2 / mol photons) (index 0)
   real(r8),parameter,dimension(0:1) :: quant_eff = [0.05_r8,0.0_r8]
-  integer, parameter :: max_iters = 40
+  integer, parameter :: max_iters = 5
 
   ! empirical curvature parameter for ap photosynthesis co-limitation
   real(r8),parameter :: theta_ip = 0.999_r8

@@ -53,7 +53,8 @@ program FatesTestLeafPhoto
   real(r8), parameter :: default_veg_tempk = 25.0_r8 + tfrz   ! default value for vegetation temperature [K]
   real(r8), parameter :: default_RH = 80.0_r8                 ! default value for relative humidity [%]  
   real(r8), parameter :: default_par = 2000.0_r8              ! default value for PAR [umol/m2/s]
-  real(r8), parameter :: default_leaf_bl_resistance = 42.3_r8 ! default value for leaf boundary layer resistance [s/m]
+  !real(r8), parameter :: default_leaf_bl_resistance = 42.3_r8 ! default value for leaf boundary layer resistance [s/m]
+  real(r8),  parameter :: default_leaf_bl_resistance = 11.86_r8
   real(r8), parameter :: default_nscaler = 1.0_r8             ! default scaler for leaf nitrogen [0-1]
   real(r8), parameter :: default_dayl_fact = 1.0_r8           ! default scaler for day length [0-1]
   real(r8), parameter :: default_btran = 1.0_r8               ! default scaler for BTRAN [0-1]
@@ -65,7 +66,7 @@ program FatesTestLeafPhoto
   real(r8), parameter :: min_PAR = 0.0_r8    ! minimum PAR to calculate [umol/m2/s]
   real(r8), parameter :: max_PAR = 1500.0_r8 ! maximum PAR to calculate [umol/m2/s]
   real(r8), parameter :: PAR_inc = 5.0_r8    ! PAR increment to use [umol/m2/s]
-  real(r8), parameter :: min_RH = 10.0_r8     ! minimum RH to calculate [%]
+  real(r8), parameter :: min_RH = 0.0_r8     ! minimum RH to calculate [%]
   real(r8), parameter :: max_RH = 100.0_r8   ! maximum RH to calculate [%]
   real(r8), parameter :: RH_inc = 1.0_r8     ! RH increment to use [%]
   real(r8), parameter :: min_co2 = 50.0_r8   ! minimum CO2 concentration to calculate [umol/mol]
@@ -201,9 +202,9 @@ end interface
     PAR(i) = min_PAR + PAR_inc*(i-1)
     
     do ft = 1, num_pft 
-      call LeafLevelPhoto(default_can_air_press, default_can_co2_pp, default_can_o2_pp,  &
-        default_veg_tempk, default_can_tempk, default_can_air_vpress, default_veg_esat,  &
-        PAR(i), default_leaf_bl_resistance, default_nscaler, default_dayl_fact,          &
+      call LeafLevelPhoto(96650.0_r8, 35.84_r8, default_can_o2_pp,  &
+        292.1_r8, 292.1_r8, 1227.179_r8, 2189.363_r8,  &
+        PAR(i), default_leaf_bl_resistance, default_nscaler , default_dayl_fact,          &
         default_btran, ft, leaf_photo_byPAR(i,ft), stomatal_resistance, test_out)
     end do
   end do
@@ -220,9 +221,9 @@ end interface
     co2_pp(i) = ((min_co2 + co2_inc*(i-1))/1.0E6_r8)*default_can_air_press
     
     do ft = 1, num_pft 
-      call LeafLevelPhoto(default_can_air_press, co2_pp(i), default_can_o2_pp,           &
-        default_veg_tempk, default_can_tempk, default_can_air_vpress, default_veg_esat,  &
-        default_par, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
+      call LeafLevelPhoto(96650.0_r8, co2_pp(i), default_can_o2_pp,           &
+        291.7414_r8, 291.7414_r8, 1264.227_r8, 2142.282_r8,  &
+        600.5_r8, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
         default_btran, ft, leaf_photo_byCO2(i,ft), stomatal_resistance, test_out)
     end do
   end do
@@ -238,13 +239,13 @@ end interface
     ! calculate RH
     RH(i) = min_RH + RH_inc*(i-1)
     
-    !if (RH(i) >= 30.0_r8) then 
-    !  veg_temp = default_veg_tempk
-    !else 
-    !  veg_temp = 35.0_r8 + tfrz
-    !end if 
+    if (RH(i) >= 30.0_r8) then 
+     veg_temp = default_veg_tempk
+    else 
+     veg_temp = 35.0_r8 + tfrz
+    end if 
     
-    veg_temp = default_veg_tempk
+    !veg_temp = default_veg_tempk
     
     ! calculate saturation vapor pressure and vapor pressure
     call CalcVaporPressure(veg_temp, RH(i), veg_esat_byRH(i), veg_air_vpress)
@@ -253,10 +254,15 @@ end interface
     can_air_vpress_byRH(i) = (RH(i)/100.0_r8)*veg_esat_byRH(i)
     
     do ft = 1, num_pft 
-      call LeafLevelPhoto(default_can_air_press, default_can_co2_pp, default_can_o2_pp,  &
-        veg_temp, default_can_tempk, can_air_vpress_byRH(i), veg_esat_byRH(i),           &
-        default_PAR, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
+      ! call LeafLevelPhoto(default_can_air_press, default_can_co2_pp, default_can_o2_pp,  &
+      !   veg_temp, default_can_tempk, can_air_vpress_byRH(i), veg_esat_byRH(i),           &
+      !   default_PAR, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
+      !   default_btran, ft, leaf_photo_byRH(i,ft), stomatal_resistance, test_out)
+      call LeafLevelPhoto(96690.0_r8, 35.3903_r8, default_can_o2_pp,  &
+        299.4973_r8, 299.4973_r8, can_air_vpress_byRH(i), veg_esat_byRH(i),           &
+        222.4909_r8, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
         default_btran, ft, leaf_photo_byRH(i,ft), stomatal_resistance, test_out)
+      
     end do
   end do
   
