@@ -33,6 +33,7 @@ program FatesTestLeafPhoto
   real(r8)                           :: default_can_air_vpress   ! default value for vapor pressure of canopy air [Pa]
   real(r8)                           :: default_veg_esat         ! default saturation vapor pressure at vegetation surface [Pa]
   real(r8)                           :: veg_temp                 ! vegetation temperature [K]
+  real(r8)                           :: co2                      ! co2 partial pressure
   integer                            :: num_temp, num_PAR        ! array sizes
   integer                            :: num_RH, num_co2          ! array sizes
   integer                            :: num_nscaler, num_btran   ! array sizes
@@ -53,8 +54,8 @@ program FatesTestLeafPhoto
   real(r8), parameter :: default_veg_tempk = 25.0_r8 + tfrz   ! default value for vegetation temperature [K]
   real(r8), parameter :: default_RH = 80.0_r8                 ! default value for relative humidity [%]  
   real(r8), parameter :: default_par = 2000.0_r8              ! default value for PAR [umol/m2/s]
-  !real(r8), parameter :: default_leaf_bl_resistance = 42.3_r8 ! default value for leaf boundary layer resistance [s/m]
-  real(r8),  parameter :: default_leaf_bl_resistance = 11.86_r8
+  real(r8), parameter :: default_leaf_bl_resistance = 42.3_r8 ! default value for leaf boundary layer resistance [s/m]
+  !real(r8),  parameter :: default_leaf_bl_resistance = 11.86_r8
   real(r8), parameter :: default_nscaler = 1.0_r8             ! default scaler for leaf nitrogen [0-1]
   real(r8), parameter :: default_dayl_fact = 1.0_r8           ! default scaler for day length [0-1]
   real(r8), parameter :: default_btran = 1.0_r8               ! default scaler for BTRAN [0-1]
@@ -239,13 +240,14 @@ end interface
     ! calculate RH
     RH(i) = min_RH + RH_inc*(i-1)
     
-    if (RH(i) >= 30.0_r8) then 
-     veg_temp = default_veg_tempk
-    else 
-     veg_temp = 35.0_r8 + tfrz
-    end if 
-    
     !veg_temp = default_veg_tempk
+    if (RH(i) >= 40.0_r8) then 
+      veg_temp = 298.46_r8
+      co2 = 33.1_r8
+    else
+      veg_temp = 308.4885_r8
+      co2 = 34.51_r8
+    end if 
     
     ! calculate saturation vapor pressure and vapor pressure
     call CalcVaporPressure(veg_temp, RH(i), veg_esat_byRH(i), veg_air_vpress)
@@ -258,8 +260,8 @@ end interface
       !   veg_temp, default_can_tempk, can_air_vpress_byRH(i), veg_esat_byRH(i),           &
       !   default_PAR, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
       !   default_btran, ft, leaf_photo_byRH(i,ft), stomatal_resistance, test_out)
-      call LeafLevelPhoto(96690.0_r8, 35.3903_r8, default_can_o2_pp,  &
-        299.4973_r8, 299.4973_r8, can_air_vpress_byRH(i), veg_esat_byRH(i),           &
+      call LeafLevelPhoto(96690.0_r8, co2, default_can_o2_pp,  &
+        veg_temp, veg_temp, can_air_vpress_byRH(i), veg_esat_byRH(i),           &
         222.4909_r8, default_leaf_bl_resistance, default_nscaler, default_dayl_fact,     &
         default_btran, ft, leaf_photo_byRH(i,ft), stomatal_resistance, test_out)
       
