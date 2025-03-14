@@ -125,8 +125,6 @@ module LeafBiophysicsMod
   real(r8), parameter, public :: lmr_r_1 = 0.2061_r8     ! (umol CO2/m**2/s / (gN/(m2 leaf))) 
   real(r8), parameter, public :: lmr_r_2 = -0.0402_r8    ! (umol CO2/m**2/s/degree C)
 
-  ! Fraction of light absorbed by non-photosynthetic pigments
-  real(r8),parameter :: fnps = 0.15_r8
   
   ! term accounting that two photons are needed to fully transport a single 
   ! electron in photosystem 2
@@ -218,6 +216,7 @@ module LeafBiophysicsMod
                                                                   ! 0: btran does not scale vcmax or jmax
                                                                   ! 1: btran scales only vcmax
                                                                   ! 2: btran scales both vcmax and jmax
+     real(r8),allocatable :: fnps(:) ! fraction of light absorbed by non-photosynthetic pigments
      
      ! -------------------------------------------------------------------------------------
      ! Note the omission of several parameter constants:
@@ -436,11 +435,12 @@ contains
   
   ! =====================================================================================
 
-  function GetJe(par_abs,jmax) result(je)
+  function GetJe(par_abs,jmax, fnps) result(je)
 
     ! Input
     real(r8) :: par_abs           ! Absorbed PAR per leaf area [umol photons/m**2/s]
     real(r8) :: jmax              ! maximum electron transport rate (umol electrons/m**2/s)
+    real(r8) :: fnps              ! Fraction of light absorbed by non-photosynthetic pigments
     real(r8) :: je                ! electron transport rate (umol electrons/m**2/s)
     real(r8) :: aquad,bquad,cquad ! terms for quadratic equations
     real(r8) :: r1,r2             ! roots of quadratic equation
@@ -474,13 +474,14 @@ contains
 
   ! =====================================================================================
   
-  function AgrossRuBPC3(par_abs,jmax,ci,co2_cpoint) result(aj)
+  function AgrossRuBPC3(par_abs,jmax,ci,co2_cpoint, fnps) result(aj)
 
     ! Input
     real(r8) :: par_abs    ! Absorbed PAR per leaf area [umol photons/m2leaf/s ]
     real(r8) :: jmax       ! maximum electron transport rate (umol electrons/m**2/s)
     real(r8) :: ci         ! intracellular leaf CO2 (Pa)
     real(r8) :: co2_cpoint ! CO2 compensation point (Pa)
+    real(r8) :: fnps       ! Fraction of light absorbed by non-photosynthetic pigments
 
     ! Output
     real(r8) :: aj         ! RuBP-limited gross photosynthesis (umol CO2/m**2/s)
@@ -489,7 +490,7 @@ contains
     real(r8) :: je         ! actual electron transport rate (umol electrons/m**2/s)
     
     ! Get the smoothed (quadratic between J and Jmax) electron transport rate
-    je = GetJe(par_abs,jmax)
+    je = GetJe(par_abs,jmax,fnps)
 
     
     aj = je * max(ci-co2_cpoint, 0._r8) / &
@@ -552,6 +553,7 @@ contains
     real(r8), intent(in) :: par_abs        ! par absorbed per unit leaf area [umol photons/m2leaf/s ]
     real(r8), intent(in) :: gb             ! leaf boundary layer conductance (umol H2O/m**2/s)
     real(r8), intent(in) :: gs0            ! stomatal intercept
+    
     
     ! output
     real(r8), intent(out) :: ci_max  ! Intracellular Co2 at maximum conductance [Pa]
@@ -718,7 +720,7 @@ contains
     end if
        
     ! Get the maximum e tranport rate for when we solve for RuBP (twice)
-    Je = GetJe(par_abs,jmax)
+    Je = GetJe(par_abs,jmax,lb_params%fnps(ft))
     
     ! Find ci at maximum conductance (1/inf = 0)
     
@@ -747,7 +749,7 @@ contains
     f = 8._r8*co2_cpoint
     g = lmr
     ci(2) = CiFromAnetDiffGrad(a,b,c,d,e,f,g)
-    ag(2) = AgrossRuBPC3(par_abs,jmax,ci(2),co2_cpoint)
+    ag(2) = AgrossRuBPC3(par_abs,jmax,ci(2),co2_cpoint,lb_params%fnps(ft))
     
     if(debug)then
        if ( abs((can_co2_ppress-ci(2))/b - (ag(2)-lmr))  > 1.e-3_r8 ) then
@@ -785,7 +787,7 @@ contains
     f = 8._r8*co2_cpoint
     g = lmr
     ci(2) = CiFromAnetDiffGrad(a,b,c,d,e,f,g)
-    ag(2) = AgrossRuBPC3(par_abs,jmax,ci(2),co2_cpoint)
+    ag(2) = AgrossRuBPC3(par_abs,jmax,ci(2),co2_cpoint,lb_params%fnps(ft))
     
     if(debug)then
        if ( abs((can_co2_ppress-ci(2))/b -(ag(2)-lmr))  > 1.e-3_r8 ) then
@@ -904,7 +906,7 @@ contains
        ac = AgrossRubiscoC3(vcmax,ci,can_o2_ppress,co2_cpoint,mm_kco2,mm_ko2)
        
        ! C3: RuBP-limited photosynthesis
-       aj = AgrossRuBPC3(par_abs,jmax,ci,co2_cpoint )
+       aj = AgrossRuBPC3(par_abs,jmax,ci,co2_cpoint,lb_params%fnps(ft))
 
        ! Take the minimum, no smoothing
        agross = min(ac,aj)
