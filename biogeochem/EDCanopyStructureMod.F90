@@ -2268,6 +2268,7 @@ contains
    currentCohort%nv =  count((currentCohort%treelai+currentCohort%treesai) .gt. dlower_vai(:)) + 1
 
    if( currentCohort%nv .ne. minloc(dlower_vai, DIM=1, MASK=(dlower_vai>(currentCohort%treelai+currentCohort%treesai))) ) then
+      write(fates_log(),*) 'pft', currentCohort%pft
       write(fates_log(),*) 'We use two methods of finding maximum leaf layers, and they are not equivalent'
       write(fates_log(),*) 'count method:',currentCohort%nv
       write(fates_log(),*) 'minloc method:',minloc(dlower_vai, DIM=1, MASK=(dlower_vai>(currentCohort%treelai+currentCohort%treesai)))
