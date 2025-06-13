@@ -28,6 +28,7 @@ specify anything, the script will use the default FATES parameter cdl file.
 """
 import os
 import argparse
+import subprocess
 import matplotlib.pyplot as plt
 
 from build_fortran_tests import build_tests, build_exists
@@ -39,12 +40,18 @@ from load_functional_tests import *
 
 add_cime_lib_to_path()
 
-from CIME.utils import run_cmd_no_fail
+from CIME.utils import run_cmd
 
 # constants for this script
-_DEFAULT_CONFIG_FILE = "functional_tests.cfg"
-_DEFAULT_CDL_PATH = os.path.abspath("../parameter_files/fates_params_default.cdl")
-_CMAKE_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../")
+_FILE_DIR = os.path.dirname(__file__)
+_DEFAULT_CONFIG_FILE = os.path.join(_FILE_DIR, "functional_tests.cfg")
+_DEFAULT_CDL_PATH = os.path.abspath(os.path.join(
+    _FILE_DIR,
+    os.pardir,
+    "parameter_files",
+    "fates_params_default.cdl",
+))
+_CMAKE_BASE_DIR = os.path.join(_FILE_DIR, os.pardir)
 _TEST_SUB_DIR = "testing"
 
 
@@ -72,6 +79,13 @@ def commandline_args():
         "Can be a netcdf (.nc) or cdl (.cdl) file.\n"
         "If no file is specified the script will use the default .cdl file in the\n"
         "parameter_files directory.\n",
+    )
+
+    parser.add_argument(
+        "--config-file",
+        type=str,
+        default=_DEFAULT_CONFIG_FILE,
+        help=f"Configuration file where test list is defined. Default: '{_DEFAULT_CONFIG_FILE}'",
     )
 
     parser.add_argument(
@@ -196,7 +210,7 @@ def check_param_file(param_file):
             None, "Must supply parameter file with .cdl or .nc ending."
         )
     if not os.path.isfile(param_file):
-        raise argparse.ArgumentError(None, f"Cannot find file {param_file}.")
+        raise FileNotFoundError(param_file)
 
 
 def check_build_dir(build_dir, test_dict):
@@ -295,8 +309,11 @@ def run_functional_tests(
     if run_executables:
         print("Running executables")
         for _, test in test_dict.items():
-            # prepend parameter file (if required) to argument list
             args = test.other_args
+            # prepend datm file (if required) to argument list
+            if test.datm_file:
+                args.insert(0, test.datm_file)
+            # prepend parameter file (if required) to argument list
             if test.use_param_file:
                 args.insert(0, param_file)
             # run
@@ -386,7 +403,11 @@ def run_fortran_exectuables(build_dir, test_dir, test_exe, run_dir, args):
     run_command.extend(args)
 
     os.chdir(run_dir)
-    out = run_cmd_no_fail(" ".join(run_command), combine_output=True)
+    cmd = " ".join(run_command)
+    stat, out, _ = run_cmd(cmd, combine_output=True)
+    if stat:
+        print(out)
+        raise subprocess.CalledProcessError(stat, cmd, out)
     print(out)
 
 
@@ -395,13 +416,13 @@ def main():
     Reads in command-line arguments and then runs the tests.
     """
 
-    full_test_dict = config_to_dict(_DEFAULT_CONFIG_FILE)
-    subclasses = FunctionalTest.__subclasses__()
-
     args = commandline_args()
+
+    full_test_dict = config_to_dict(args.config_file)
     config_dict = parse_test_list(full_test_dict, args.test_list)
 
     test_dict = {}
+    subclasses = FunctionalTest.__subclasses__()
     for name in config_dict.keys():
         test_class = list(filter(lambda subclass: subclass.name == name, subclasses))[
             0
