@@ -7,7 +7,7 @@ import os
 import re
 import configparser
 import argparse
-from path_utils import add_cime_lib_to_path
+from .path_utils import add_cime_lib_to_path
 
 add_cime_lib_to_path()
 

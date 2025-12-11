@@ -32,7 +32,6 @@ import subprocess
 import matplotlib.pyplot as plt
 
 from build_fortran_tests import build_tests, build_exists
-from functional_class_with_drivers import FunctionalTestWithDrivers
 from path_utils import add_cime_lib_to_path
 from utils import copy_file, create_nc_from_cdl, config_to_dict, parse_test_list
 
