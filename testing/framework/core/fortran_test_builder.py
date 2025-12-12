@@ -12,7 +12,7 @@ from testing.framework.core.cime_interface import CIMEInterface
 
 
 class FortranTestBuilder:
-    """Builder that prepares, configures, and compiles Fotran-based tests."""
+    """Builder that prepares, configures, and compiles Fortran-based tests."""
 
     def __init__(
         self,
@@ -32,7 +32,7 @@ class FortranTestBuilder:
         self._netcdf_f_path: Optional[str] = None
         self._cmake_args: Optional[str] = None
 
-    def build(self, *, make_j: int, clean: bool, verbose: bool):
+    def build(self, *, make_j: int=8, clean: bool=False, verbose: bool=False, debug: bool=False):
         """Creates the build directory, resolves libraries, runs cmake,
         and compiles with make.
 
@@ -42,7 +42,7 @@ class FortranTestBuilder:
             verbose (bool): whether to use verbose printing in the compile commands
         """
         self._prepare_build_dir(clean)
-        self._resolve_library_paths()
+        self._resolve_library_paths(debug)
         self._run_cmake()
         self._run_make(make_j, clean, verbose)
 
@@ -79,7 +79,7 @@ class FortranTestBuilder:
                 except IsADirectoryError:
                     shutil.rmtree(fname)
 
-    def _resolve_library_paths(self):
+    def _resolve_library_paths(self, debug):
         """Creates a fake CIME case to query PFUNIT/NETCDF paths and CMake args."""
         cime = self.cime
 
@@ -108,9 +108,9 @@ class FortranTestBuilder:
             f"-DOS={os_}",
             f"-DMACH={machobj.get_machine_name()}",
             f"-DCOMPILER={compiler}",
-            f"-DDEBUG={cime.stringify_bool(True)}",
+            f"-DDEBUG={'ON' if debug else 'OFF'}",
             f"-DMPILIB={self.mpilib}",
-            f"-Dcompile_threaded={cime.stringify_bool(False)}",
+            f"-Dcompile_threaded={'OFF'}",
             f"-DCASEROOT={self.build_dir}",
         ]
         self._cmake_args = " ".join(args)

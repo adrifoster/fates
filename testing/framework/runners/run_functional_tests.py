@@ -5,14 +5,14 @@
 |---------------------  Instructions  -----------------------------|
 |------------------------------------------------------------------|
 To run this script the following python packages are required:
-        - numpy
-        - xarray
-        - matplotlib
-        - pandas
+    - numpy
+    - xarray
+    - matplotlib
+    - pandas
 
 Though this script does not require any host land model code, it does require some CIME
 and shr code, so you should still get these repositories as you normally would
-(i.e., manage_externals, etc.)
+(i.e., ./bin/git-fleximod -update, etc.)
 
 Additionally, this requires netcdf and netcdff as well as a fortran compiler.
 
@@ -31,16 +31,14 @@ import argparse
 import subprocess
 import matplotlib.pyplot as plt
 
-from build_fortran_tests import build_tests, build_exists
-from path_utils import add_cime_lib_to_path
-from utils import copy_file, create_nc_from_cdl, config_to_dict, parse_test_list
-
-# load the functional test classes
-from load_functional_tests import *
-
-add_cime_lib_to_path()
-
-from CIME.utils import run_cmd
+from testing.framework.core.fortran_test_builder import FortranTestBuilder
+from testing.framework.utils.utils import (
+    copy_file,
+    create_nc_from_cdl,
+    config_to_dict,
+    parse_test_list,
+)
+from testing.framework.core.load_functional_tests import *
 
 # constants for this script
 _FILE_DIR = os.path.dirname(__file__)
@@ -426,7 +424,9 @@ def get_test_subclasses(*argv):
     """
     test_subclasses = []
     for ftest_class in argv:
-        test_subclasses += [x for x in ftest_class.__subclasses__() if hasattr(x, "name")]
+        test_subclasses += [
+            x for x in ftest_class.__subclasses__() if hasattr(x, "name")
+        ]
     return test_subclasses
 
 

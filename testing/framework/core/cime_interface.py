@@ -3,6 +3,7 @@
 import os
 import sys
 
+
 class CIMEInterface:
     """
     Centralized access to the CIME Python modules.
@@ -47,9 +48,7 @@ class CIMEInterface:
         Returns:
             str: path to cime
         """
-        candidate = os.path.normpath(
-            os.path.join(self.fates_root, "../../cime")
-        )
+        candidate = os.path.normpath(os.path.join(self.fates_root, "../../cime"))
         if os.path.isdir(candidate):
             return candidate
 
@@ -72,19 +71,14 @@ class CIMEInterface:
         import CIME.XML.machines as cime_machines
         import CIME.XML.env_mach_specific as env_mach_specific
         import CIME.build as cime_build
-   
-        self.utils = CIME.utils
+
         self.configure = cime_config.configure
         self.FakeCase = cime_config.configure.FakeCase
-        self.stringify_bool = CIME.utils.stringify_bool
-        self.run_cmd_no_fail = CIME.utils.run_cmd_no_fail
-        self.run_cmd = CIME.utils.run_cmd
         self.get_src_root = CIME.utils.get_src_root
-        
         self.Machines = cime_machines.Machines
         self.EnvMachSpecific = env_mach_specific.EnvMachSpecific
         self.CmakeTmpBuildDir = cime_build.CmakeTmpBuildDir
-        
+
     # -----------------------------
     # Public API
     # -----------------------------
