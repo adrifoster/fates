@@ -218,6 +218,8 @@ contains
                     !hksat        => soilstate_inst%hksat_col       , &  ! Soil layer hydraulic conductivity at saturation (mm H2O/s)
                     
                     ! get from model
+                    ! temp = bc_in(s)%tgcm_pa(ifp)
+                    ! Rn = bc_in(s)%netrad_net_pa(ifp)
                     Eo       = 0.004_r8       ! [m day-1] ref ET --> need Rnet and temp -> cal Priestley Taylor or this can be gcmax * VPD
                     !LAI      = 2.0_r8        ! [m2 m-2] <- cohort specific , dont need because kmax per sapwood area
                     hc       = ccohort%height ! [m] 

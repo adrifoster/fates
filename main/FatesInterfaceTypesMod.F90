@@ -495,6 +495,8 @@ module FatesInterfaceTypesMod
              
       ! air temperature at agcm reference height (kelvin)
       real(r8), allocatable :: tgcm_pa(:)
+      
+      real(r8), allocatable :: netrad_net_pa(:) ! net radiation [W/m2]
 
       ! soil temperature (Kelvin)
       real(r8), allocatable :: t_soisno_sl(:)
@@ -632,6 +634,7 @@ module FatesInterfaceTypesMod
       ! Integrated (vertically) transpiration wetness factor (0 to 1) 
       ! (diagnostic, should not be used by HLM)
       real(r8), allocatable :: btran_pa(:)
+      
 
       ! Sunlit canopy resistance [s/m]
       real(r8), allocatable :: rssun_pa(:)
