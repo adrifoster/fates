@@ -23,6 +23,7 @@ module EDBtranMod
   use FatesAllometryMod , only : set_root_fraction
   use shr_log_mod , only      : errMsg => shr_log_errMsg
   use FatesGlobals,      only : endrun => fates_endrun
+  use FatesAllometryMod, only : bsap_allom
 
   !
   implicit none
@@ -123,70 +124,185 @@ contains
     real(r8) :: pftgs(maxpft)     ! pft weighted stomatal conductance m/s
     real(r8) :: temprootr
     real(r8) :: sum_pftgs         ! sum of weighted conductances (for normalization)
-    real(r8), allocatable :: root_resis(:,:)  ! Root resistance in each pft x layer
+    real(r8), allocatable :: root_resis(:,:)  ! Root resistance in each pft x layer'
+    real(r8), allocatable :: root_resis_cohort(:)  ! Root resistance in each cohort'
+
+    !------------------------------------------------------------------------------
+    ! added variables
+  
+    real(r8) :: mm_to_MPa, rho_w, g, Zm, Td, Eo, b, Ps0, Ks, n
+    real(r8) :: s_h, s_fc, RAI, dr, hc
+    real(r8) :: k_xl_max, k_max, Px50, Pg50, LAI
+    real(r8) :: f_wilt, f_star
+    real(r8) :: K_p_max, K_sr_max
+    real(r8) :: pi_F, pi_R, pi_T, pi_S
+    real(r8) :: x1, beta_ww
+    real(r8) :: beta_w, y, xx_w, xxx_w, x_w, p
+    real(r8) :: beta_s, xx_s, xxx_s, x_s
+    real(r8) :: psi_wilt, psi_star
+    real(r8) :: smpso_t, smpsc_t
+    real(r8) :: btran_cohort
+    real(r8) :: a_sapwood, c_sap_dummy
+
     !------------------------------------------------------------------------------
 
     associate(                                 &
-         smpsc     => EDPftvarcon_inst%smpsc          , &  ! INTERF-TODO: THESE SHOULD BE FATES PARAMETERS
-         smpso     => EDPftvarcon_inst%smpso            &  ! INTERF-TODO: THESE SHOULD BE FATES PARAMETERS
+    !     smpsc     => EDPftvarcon_inst%smpsc              , &  ! INTERF-TODO: THESE SHOULD BE FATES PARAMETERS
+    !     smpso     => EDPftvarcon_inst%smpso                &  ! INTERF-TODO: THESE SHOULD BE FATES PARAMETERS
+          Pg50_pft      => EDPftvarcon_inst%hydr_p50_gs    , &
+          Px50_pft      => EDPftvarcon_inst%hydr_p50_node  , &
+          k_max_pft     => EDPftvarcon_inst%hydr_kmax_node  &
          )
 
-    do s = 1,nsites
+    do s = 1,nsites ! grid cell
 
        allocate(root_resis(numpft,bc_in(s)%nlevsoil))
+       allocate(root_resis_cohort(bc_in(s)%nlevsoil))
 
        bc_out(s)%rootr_pasl(:,:) = 0._r8
 
        cpatch => sites(s)%oldest_patch
-       do while (associated(cpatch))
+       do while (associated(cpatch)) ! patch ~ plot that has an age and can have multiple cohorts/pft
 
           ifp = cpatch%patchno
           
           if_bare: if(cpatch%nocomp_pft_label.ne.nocomp_bareground)then ! only for veg patches
 
-             ! THIS SHOULD REALLY BE A COHORT LOOP ONCE WE HAVE rootfr_ft FOR COHORTS (RGK)
-
-             do ft = 1,numpft
-
+            
+             ! COHORT LOOP 
+             cpatch%btran_ft(:) = 0.0_r8
+             root_resis(:,:) = 0.0_r8
+             ccohort => cpatch%tallest
+             do while (associated(ccohort))
+                  ft=ccohort%pft
+                  call bsap_allom(ccohort%dbh,ft,ccohort%crowndamage, &
+                       ccohort%canopy_trim, ccohort%efstem_coh, a_sapwood,c_sap_dummy)
                   call set_root_fraction(sites(s)%rootfrac_scr, ft, sites(s)%zi_soil, &
                        bc_in(s)%max_rooting_depth_index_col ) 
 
-                cpatch%btran_ft(ft) = 0.0_r8
+                !cpatch%btran_ft(ft) = 0.0_r8
+                ! calculating by cohort verusus patch
+                btran_cohort = 0.0_r8 
                 do j = 1,bc_in(s)%nlevsoil
 
                    ! Calculations are only relevant where liquid water exists
                    ! see clm_fates%wrap_btran for calculation with CLM/ALM
 
+                    ! US-Me2: Sandy loam / Ponderosa pine hydraulic thresholds
+                    ! Computes psi_wilt, psi_star, and rresis from smp_node
+                    ! ---------------------------------------------------------------------------------
+                    
+                    ! Parameters
+                    mm_to_MPa = 9.80665e-6_r8  ! Conversion factor: 1 mm H2O ≈ 9.80665e-6 MPa
+                    rho_w    = 1000.0_r8      ! [kg m-3] Density of liquid water
+                    g        = 9.81_r8        ! [m s-2] Gravitational acceleration
+                    Zm       = 0.5_r8         ! [m] Rooting depth 
+                    Td       = 43200.0_r8     ! [s] sec per day cnversion factor
+                    f_wilt   = 0.05_r8        ! [-] fraction of beta_ww at wilting point
+                    f_star   = 0.95_r8        ! [-] fraction of beta_ww at incipient stomatal closure
+
+                    ! not important to change but use clm parameter if they exist
+                    RAI      = 10.0_r8        ! [m2 m-2] Root area index 
+                    dr       = 0.0005_r8      ! [m] root diameter
+
+                    !-> FATES & CLM parameters 
+                    !k_xl_max = 0.0001_r8      ! [kg m-1 MPa-1 s-1]  Leaf-specific maximum xylem hydraulic conductivity
+                    k_max = k_max_pft(ft,2)    ! [kg/MPa/m/s] maximum xylem conductivity per unit conducting xylem area
+                    !Px50     = -2.25_r8        ! [MPa] leaf potential at 50% stem conductance loss (scale with sapwood area)
+                    Px50 = Px50_pft(ft,2)
+                    !Pg50     = -1.5_r8        ! [MPa] leaf potential at 50% stomatal conductance loss
+                    Pg50 = Pg50_pft(ft)
+                    
+                    Ps0      = -0.00214_r8    ! [MPa] Soil water potential near saturation = 1 / alpha VG
+                    Ks       = 1.5_r8         ! [m day-1] Saturated hydraulic conductivity [m d-1] soil to root conductivity
+                    !hksat        => soilstate_inst%hksat_col       , &  ! Soil layer hydraulic conductivity at saturation (mm H2O/s)
+                    
+                    ! get from model
+                    Eo       = 0.004_r8       ! [m day-1] ref ET --> need Rnet and temp -> cal Priestley Taylor or this can be gcmax * VPD
+                    !LAI      = 2.0_r8        ! [m2 m-2] <- cohort specific , dont need because kmax per sapwood area
+                    hc       = ccohort%height ! [m] 
+
+                    ! new thing to define
+                    
+                    
+                    
+                    ! Conductivities
+                    K_p_max  = k_max * a_sapwood / hc * Td / rho_w
+                    K_sr_max = Ks * sqrt(RAI / (dr * Zm)) * 1.0e6_r8 / (rho_w * g)
+                    
+                    ! Pi-groups
+                    pi_F = -Eo / (K_p_max * Pg50)
+                    pi_R = Pg50 / Px50
+                    pi_T = -(K_sr_max * Pg50) / Eo
+                    pi_S = Pg50 / Ps0
+                    
+                    ! Well-watered beta - maybe not use
+                    x1 = (pi_F / 2.0_r8 + 1.0_r8)**2 - 2.0_r8 * pi_F * pi_R
+                    beta_ww = 1.0_r8 - (1.0_r8 / (2.0_r8 * pi_R)) * (1.0_r8 + pi_F / 2.0_r8 - sqrt(x1))
+                    
+                    ! smpsc soil water potential close
+                    beta_w = f_wilt * beta_ww
+                    y      = 1.0_r8 / (2.0_r8 * beta_w * pi_S / pi_T)
+                    xx_w   = 1.0_r8 - beta_w
+                    xxx_w  = pi_F * beta_w / (1.0_r8 - xx_w * pi_R)
+                    x_w    = 1.0_r8 + (2.0_r8 * xx_w - xxx_w) * 4.0_r8 * beta_w * pi_S * pi_S / pi_T
+                    p      = y * (sqrt(x_w) - 1.0_r8)
+                    smpsc_t = p * Ps0
+                    
+                    ! smpso soil water potential open 
+                    beta_s = f_star * beta_ww
+                    y      = 1.0_r8 / (2.0_r8 * beta_s * pi_S / pi_T)
+                    xx_s   = 1.0_r8 - beta_s
+                    xxx_s  = pi_F * beta_s / (1.0_r8 - xx_s * pi_R)
+                    x_s    = 1.0_r8 + (2.0_r8 * xx_s - xxx_s) * 4.0_r8 * beta_s * pi_S * pi_S / pi_T
+                    p      = y * (sqrt(x_s) - 1.0_r8)
+                    smpso_t = p * Ps0
+
                    if ( check_layer_water(bc_in(s)%h2o_liqvol_sl(j),bc_in(s)%tempk_sl(j)) )  then
 
-                      smp_node = max(smpsc(ft), bc_in(s)%smp_sl(j))
+                      smp_node = max(smpsc_t, bc_in(s)%smp_sl(j) * mm_to_MPa)
 
                       rresis  = min( (bc_in(s)%eff_porosity_sl(j)/bc_in(s)%watsat_sl(j))*               &
-                           (smp_node - smpsc(ft)) / (smpso(ft) - smpsc(ft)), 1._r8)
+                            (smp_node - smpsc_t) / (smpso_t - smpsc_t), 1._r8)
 
-                      root_resis(ft,j) = sites(s)%rootfrac_scr(j)*rresis
-
+                      root_resis_cohort(j) = sites(s)%rootfrac_scr(j)*rresis
+                     
+                     
                       ! root water uptake is not linearly proportional to root density,
                       ! to allow proper deep root funciton. Replace with equations from SPA/Newman. FIX(RF,032414)
 
-                      cpatch%btran_ft(ft) = cpatch%btran_ft(ft) + root_resis(ft,j)
+                      !cpatch%btran_ft(ft) = cpatch%btran_ft(ft) + root_resis(ft,j)
+                      ! calculating by cohort verusus patch
+                      btran_cohort = btran_cohort + root_resis_cohort(j)
 
                    else
-                      root_resis(ft,j) = 0._r8
+                      root_resis_cohort(j) = 0._r8
                    end if
 
                 end do !j
+               
+                cpatch%btran_ft(ft) = cpatch%btran_ft(ft) + btran_cohort
+                root_resis(ft,:) = root_resis(ft,:) + root_resis_cohort(:)
 
-                ! Normalize root resistances to get layer contribution to ET
-                do j = 1,bc_in(s)%nlevsoil  
+                ccohort => ccohort%shorter
+             end do ! cohort
+             
+             cpatch%btran_ft(ft) = cpatch%btran_ft(ft) / cpatch%num_cohorts
+             root_resis = root_resis / cpatch%num_cohorts
+
+             ! pft in the patch
+             do ft = 1,numpft 
+             
+             ! Normalize root resistances to get layer contribution to ET
+             do j = 1,bc_in(s)%nlevsoil  
                    if (cpatch%btran_ft(ft)  >  nearzero) then
                       root_resis(ft,j) = root_resis(ft,j)/cpatch%btran_ft(ft)
                    else
                       root_resis(ft,j) = 0._r8
                    end if
                 end do
+            end do
 
-             end do !PFT
 
              ! PFT-averaged point level root fraction for extraction purposese.
              ! The cohort's conductance g_sb_laweighted, contains a weighting factor
@@ -197,7 +313,7 @@ contains
              do while(associated(ccohort))
                 pftgs(ccohort%pft) = pftgs(ccohort%pft) + ccohort%g_sb_laweight
                 ccohort => ccohort%shorter
-             enddo
+             end do
 
              ! Process the boundary output, this is necessary for calculating the soil-moisture
              ! sink term across the different layers in driver/host.  Photosynthesis will
@@ -216,8 +332,8 @@ contains
                       bc_out(s)%rootr_pasl(ifp,j) = bc_out(s)%rootr_pasl(ifp,j) + &
                            root_resis(ft,j) * 1._r8/real(numpft,r8)
                    end if
-                enddo
-             enddo
+                end do
+             end do
 
              ! Calculate the BTRAN that is passed back to the HLM
              ! used only for diagnostics. If plant hydraulics is turned off
@@ -233,7 +349,7 @@ contains
                    else
                       bc_out(s)%btran_pa(ifp)   = bc_out(s)%btran_pa(ifp) + cpatch%btran_ft(ft) * 1./numpft
                    end if
-                enddo
+                end do
              end if
 
              temprootr = sum(bc_out(s)%rootr_pasl(ifp,1:bc_in(s)%nlevsoil))
@@ -244,7 +360,7 @@ contains
                 
                 do j = 1,bc_in(s)%nlevsoil
                    bc_out(s)%rootr_pasl(ifp,j) = bc_out(s)%rootr_pasl(ifp,j)/temprootr
-                enddo
+                end do
                 
              end if
           endif if_bare
