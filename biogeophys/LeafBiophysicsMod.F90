@@ -102,22 +102,22 @@ module LeafBiophysicsMod
 
 
   ! Constants used to define conductance models
-  integer, parameter :: medlyn_model = 2
-  integer, parameter :: ballberry_model = 1
+  integer, public, parameter :: medlyn_model = 2
+  integer, public, parameter :: ballberry_model = 1
 
   ! Alternatively, Gross Assimilation can be used to estimate
   ! leaf co2 partial pressure and therefore conductance. The default
   ! is to use anet
-  integer, parameter :: net_assim_model = 1
-  integer, parameter :: gross_assim_model = 2
+  integer, public, parameter :: net_assim_model = 1
+  integer, public, parameter :: gross_assim_model = 2
 
   ! Constants defining the electron transport model to use
   integer, public, parameter :: FvCB1980 = 1
   integer, public, parameter :: JohnsonBerry2021 = 2
 
   ! Constants defining the photosynthesis temperature acclimation model
-  integer, parameter :: photosynth_acclim_model_none = 0
-  integer, parameter :: photosynth_acclim_model_kumarathunge_etal_2019 = 1
+  integer, public, parameter :: photosynth_acclim_model_none = 0
+  integer, public, parameter :: photosynth_acclim_model_kumarathunge_etal_2019 = 1
 
   ! Rdark constants from Atkin et al., 2017 https://doi.org/10.1007/978-3-319-68703-2_6
   ! and Heskel et al., 2016 https://doi.org/10.1073/pnas.1520282113

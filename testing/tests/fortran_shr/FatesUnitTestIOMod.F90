@@ -39,6 +39,7 @@ module FatesUnitTestIOMod
   public :: GetVar
   public :: RegisterNCDims
   public :: RegisterVar
+  public :: RegisterFillValue
   public :: WriteVar
   public :: EndNCDef
 
@@ -491,6 +492,26 @@ module FatesUnitTestIOMod
     end do
 
   end subroutine RegisterVar
+
+  !  =====================================================================================
+
+  subroutine RegisterFillValue(ncid, varID, fill_value)
+    !
+    ! DESCRIPTION:
+    ! Registers a numeric _FillValue attribute on a variable, so readers that
+    ! recognize the netCDF convention (e.g. xarray) can auto-mask unwritten
+    ! entries instead of relying on documentation alone. Must be called before
+    ! EndNCDef, like RegisterVar's own attributes.
+    !
+
+    ! ARGUMENTS:
+    integer,  intent(in) :: ncid       ! netcdf file id
+    integer,  intent(in) :: varID      ! variable ID
+    real(r8), intent(in) :: fill_value ! fill value to register
+
+    call Check(nf90_put_att(ncid, varID, '_FillValue', fill_value))
+
+  end subroutine RegisterFillValue
 
   !  =====================================================================================
 

@@ -82,6 +82,7 @@ module FATESPlantRespPhotosynthMod
   private
 
   public :: FatesPlantRespPhotosynthDrive ! Called by the HLM-Fates interface
+  public :: NonleafMaintenanceRespiration ! Live stem/coarse root/fine root MR - also usable standalone
 
   character(len=*), parameter, private :: sourcefile = &
        __FILE__
@@ -979,57 +980,17 @@ contains
                         ! no sub-pools chopping up those pools any finer that need to be dealt with.
                         !------------------------------------------------------------------------------
 
-                        ! Live stem MR (kgC/plant/s) (above ground sapwood)
-                        ! ------------------------------------------------------------------
-                        if ( int(woody(ft)) == itrue) then
-                           tcwood = q10_mr**((bc_in(s)%t_veg_pa(ifp)-tfrz - 20.0_r8)/10.0_r8)
-                           ! kgC/s = kgN * kgC/kgN/s
-                           currentCohort%livestem_mr  = live_stem_n * maintresp_nonleaf_baserate * tcwood * maintresp_reduction_factor
-                        else
-                           currentCohort%livestem_mr  = 0._r8
-                        end if
-
-
-                        ! Fine Root MR  (kgC/plant/s)
-                        ! and calculate the N fixation rate as a function of the fixation-specific root respiration
-                        ! for now use dev_arbitrary_pft as scaling term between 0 and 1 as additional increment of root respiration used for N fixation
-                        ! ------------------------------------------------------------------
-                        currentCohort%froot_mr = 0._r8
-                        currentCohort%sym_nfix_tstep = 0._r8
-
-                        ! n_fixation is integrated over the course of the day
-                        ! this variable is zeroed at the end of the FATES dynamics sequence
-
-                        do j = 1,bc_in(s)%nlevsoil
-                           tcsoi  = q10_mr**((bc_in(s)%t_soisno_sl(j)-tfrz - 20.0_r8)/10.0_r8)
-
-                           fnrt_mr_layer = fnrt_n * maintresp_nonleaf_baserate * tcsoi * rootfr_ft(ft,j) * maintresp_reduction_factor
-
-                           ! calculate the cost of carbon for N fixation in each soil layer and calculate N fixation rate based on that [kgC / kgN]
-
-                           call RootLayerNFixation(bc_in(s)%t_soisno_sl(j),ft,dtime,fnrt_mr_layer,fnrt_mr_nfix_layer,nfix_layer)
-
-                           currentCohort%froot_mr = currentCohort%froot_mr + fnrt_mr_nfix_layer + fnrt_mr_layer 
-
-                           currentCohort%sym_nfix_tstep = currentCohort%sym_nfix_tstep + nfix_layer
-
-
-                        enddo
-
-                        ! Coarse Root MR (kgC/plant/s) (below ground sapwood)
-                        ! ------------------------------------------------------------------
-                        if ( int(woody(ft)) == itrue) then
-                           currentCohort%livecroot_mr = 0._r8
-                           do j = 1,bc_in(s)%nlevsoil
-                              ! Soil temperature used to adjust base rate of MR
-                              tcsoi  = q10_mr**((bc_in(s)%t_soisno_sl(j)-tfrz - 20.0_r8)/10.0_r8)
-                              currentCohort%livecroot_mr = currentCohort%livecroot_mr + &
-                                   live_croot_n * maintresp_nonleaf_baserate * tcsoi * &
-                                   rootfr_ft(ft,j) * maintresp_reduction_factor
-                           enddo
-                        else
-                           currentCohort%livecroot_mr = 0._r8
-                        end if
+                        ! Live stem, coarse root, and fine root maintenance respiration
+                        ! (kgC/plant/s), plus the symbiotic N-fixation cost added on to
+                        ! fine root respiration - see NonleafMaintenanceRespiration for
+                        ! the Q10-scaled formulas
+                        call NonleafMaintenanceRespiration(ft,                        &
+                             bc_in(s)%t_veg_pa(ifp), bc_in(s)%nlevsoil,               &
+                             bc_in(s)%t_soisno_sl(1:bc_in(s)%nlevsoil),               &
+                             rootfr_ft(ft,1:bc_in(s)%nlevsoil), live_stem_n,          &
+                             live_croot_n, fnrt_n, maintresp_reduction_factor, dtime, &
+                             currentCohort%livestem_mr, currentCohort%livecroot_mr,   &
+                             currentCohort%froot_mr, currentCohort%sym_nfix_tstep)
 
 
                         ! ------------------------------------------------------------------
@@ -1205,6 +1166,98 @@ contains
     return
   end subroutine RootLayerNFixation
 
+  ! =======================================================================================
+
+  subroutine NonleafMaintenanceRespiration(ft, veg_tempk, nlevsoil, t_soisno_sl,      &
+       rootfr_ft, live_stem_n, live_croot_n, fnrt_n, maintresp_reduction_factor,      &
+       dtime, livestem_mr, livecroot_mr, froot_mr, sym_nfix_tstep)
+
+    ! ------------------------------------------------------------------------------
+    ! Live stem (aboveground sapwood), live coarse root (belowground sapwood), and
+    ! fine root maintenance respiration, Q10-scaled by vegetation/soil temperature,
+    ! plus the symbiotic N-fixation cost added on to fine root respiration. Factored
+    ! out of the per-cohort loop in FatesPlantRespPhotosynthDrive so it can also be
+    ! called from standalone (patch-less/site-less) test drivers.
+    ! ------------------------------------------------------------------------------
+
+    ! Arguments
+    integer,  intent(in)  :: ft                          ! (plant) Functional Type Index
+    real(r8), intent(in)  :: veg_tempk                   ! vegetation/canopy air temperature [K]
+    integer,  intent(in)  :: nlevsoil                    ! number of soil layers
+    real(r8), intent(in)  :: t_soisno_sl(nlevsoil)        ! soil temperature per layer [K]
+    real(r8), intent(in)  :: rootfr_ft(nlevsoil)          ! this pft's root fraction per soil layer [-]
+    real(r8), intent(in)  :: live_stem_n                  ! aboveground sapwood N [kgN/plant]
+    real(r8), intent(in)  :: live_croot_n                 ! belowground sapwood N [kgN/plant]
+    real(r8), intent(in)  :: fnrt_n                       ! fine root N [kgN/plant]
+    real(r8), intent(in)  :: maintresp_reduction_factor   ! storage-based MR throttle [0-1]
+    real(r8), intent(in)  :: dtime                        ! time step length [s]
+    real(r8), intent(out) :: livestem_mr                  ! live stem (aboveground sapwood) MR [kgC/plant/s]
+    real(r8), intent(out) :: livecroot_mr                 ! live coarse root (belowground sapwood) MR [kgC/plant/s]
+    real(r8), intent(out) :: froot_mr                     ! fine root MR, including N-fixation cost [kgC/plant/s]
+    real(r8), intent(out) :: sym_nfix_tstep               ! symbiotic N fixation this timestep, summed over layers [kgN/plant/timestep]
+
+    ! Locals
+    integer  :: j                     ! soil layer index
+    real(r8) :: tcwood                ! temperature response function for wood
+    real(r8) :: tcsoi                 ! temperature response function for root respiration
+    real(r8) :: fnrt_mr_layer         ! fine root maintenance respiration per layer [kgC/plant/s]
+    real(r8) :: fnrt_mr_nfix_layer    ! fine root MR for symbiotic fixation [kgC/plant/layer/s]
+    real(r8) :: nfix_layer            ! nitrogen fixed in each layer this timestep [kgN/plant/layer/timestep]
+
+    ! Live stem MR (kgC/plant/s) (above ground sapwood)
+    ! ------------------------------------------------------------------
+    if ( int(prt_params%woody(ft)) == itrue) then
+       tcwood = q10_mr**((veg_tempk-tfrz - 20.0_r8)/10.0_r8)
+       ! kgC/s = kgN * kgC/kgN/s
+       livestem_mr  = live_stem_n * maintresp_nonleaf_baserate * tcwood * maintresp_reduction_factor
+    else
+       livestem_mr  = 0._r8
+    end if
+
+
+    ! Fine Root MR  (kgC/plant/s)
+    ! and calculate the N fixation rate as a function of the fixation-specific root respiration
+    ! for now use dev_arbitrary_pft as scaling term between 0 and 1 as additional increment of root respiration used for N fixation
+    ! ------------------------------------------------------------------
+    froot_mr = 0._r8
+    sym_nfix_tstep = 0._r8
+
+    ! n_fixation is integrated over the course of the day
+    ! this variable is zeroed at the end of the FATES dynamics sequence
+
+    do j = 1,nlevsoil
+       tcsoi  = q10_mr**((t_soisno_sl(j)-tfrz - 20.0_r8)/10.0_r8)
+
+       fnrt_mr_layer = fnrt_n * maintresp_nonleaf_baserate * tcsoi * rootfr_ft(j) * maintresp_reduction_factor
+
+       ! calculate the cost of carbon for N fixation in each soil layer and calculate N fixation rate based on that [kgC / kgN]
+
+       call RootLayerNFixation(t_soisno_sl(j),ft,dtime,fnrt_mr_layer,fnrt_mr_nfix_layer,nfix_layer)
+
+       froot_mr = froot_mr + fnrt_mr_nfix_layer + fnrt_mr_layer
+
+       sym_nfix_tstep = sym_nfix_tstep + nfix_layer
+
+
+    enddo
+
+    ! Coarse Root MR (kgC/plant/s) (below ground sapwood)
+    ! ------------------------------------------------------------------
+    if ( int(prt_params%woody(ft)) == itrue) then
+       livecroot_mr = 0._r8
+       do j = 1,nlevsoil
+          ! Soil temperature used to adjust base rate of MR
+          tcsoi  = q10_mr**((t_soisno_sl(j)-tfrz - 20.0_r8)/10.0_r8)
+          livecroot_mr = livecroot_mr + &
+               live_croot_n * maintresp_nonleaf_baserate * tcsoi * &
+               rootfr_ft(j) * maintresp_reduction_factor
+       enddo
+    else
+       livecroot_mr = 0._r8
+    end if
+
+    return
+  end subroutine NonleafMaintenanceRespiration
 
   ! =======================================================================================
 
