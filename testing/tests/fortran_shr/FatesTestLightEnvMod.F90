@@ -52,7 +52,7 @@ module FatesTestLightEnvMod
 
      integer  :: pft            ! plant functional type index
      integer  :: nv              ! number of occupied leaf layers
-     real(r8) :: treelai         ! cached cohort total leaf area index [m2/m2]
+     real(r8), public :: treelai         ! cached cohort total leaf area index [m2/m2]
      real(r8) :: treesai         ! cached cohort total stem area index [m2/m2]
      real(r8) :: height          ! cached cohort height [m]
      type(twostream_type) :: twostr ! two-stream radiation object (one element)

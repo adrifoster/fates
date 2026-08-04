@@ -329,7 +329,7 @@ contains
   ! ==========================================================================
 
   subroutine GrossAssimAndResp(this, cohort, pft, env, parsun_z, parsha_z,       &
-    laisun_z, laisha_z, step_size, gross_assim, total_resp)
+    laisun_z, laisha_z, maintresp_reduction_factor, step_size, gross_assim, total_resp)
     !
     ! DESCRIPTION:
     ! Whole-plant gross assimilation and total respiration (leaf dark + non-leaf
@@ -355,6 +355,7 @@ contains
     real(r8),                 intent(in) :: parsha_z(:)    ! absorbed PAR, shaded, per leaf layer [W/m2 ground] - from AttenuateCanopy, not light_env%parsha_z
     real(r8),                 intent(in) :: laisun_z(:)    ! sunlit LAI per leaf layer [m2/m2] - from AttenuateCanopy, not light_env%laisun_z
     real(r8),                 intent(in) :: laisha_z(:)    ! shaded LAI per leaf layer [m2/m2] - from AttenuateCanopy, not light_env%laisha_z
+    real(r8),                 intent(in) :: maintresp_reduction_factor  ! storage-based throttle on maintenance respiration [0-1]
     real(r8),                 intent(in) :: step_size      ! model time step [s] - passed through to NonleafMaintenanceRespiration; does not affect the carbon-flux rates read here (only its own sym_nfix_tstep output, which this diagnostic discards)
     real(r8),                 intent(out) :: gross_assim   ! whole-plant gross assimilation at this PAR profile [kgC/indiv/s]
     real(r8),                 intent(out) :: total_resp     ! whole-plant total respiration (leaf dark + non-leaf maintenance) at this PAR profile [kgC/indiv/s]
@@ -424,10 +425,10 @@ contains
 
     call NonleafMaintenanceRespiration(pft, env%tempk, env%nlevsoil,           &
       [env%t_soil], [env%rootfr_ft], this%live_stem_n, this%live_croot_n,      &
-      this%fnrt_n, this%maintresp_reduction_factor, step_size,                 &
+      this%fnrt_n, maintresp_reduction_factor, step_size,                 &
       livestem_mr, livecroot_mr, froot_mr, sym_nfix_tstep)
 
-    total_resp = leaf_resp_sum * umolC_to_kgC * this%maintresp_reduction_factor / cohort%n + &
+    total_resp = leaf_resp_sum * umolC_to_kgC * maintresp_reduction_factor / cohort%n + &
       livestem_mr + livecroot_mr + froot_mr
 
   end subroutine GrossAssimAndResp

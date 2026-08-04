@@ -174,7 +174,7 @@ program FatesSingleCohort
   real(r8), parameter :: patch_area = 1.0e4_r8               ! reference ground area the cohort occupies [m2]
   real(r8), parameter :: n_indiv = 1.0_r8                    ! number of individuals in the cohort
   real(r8), parameter :: coh_age = 0.0_r8                    ! cohort age
-  real(r8), parameter :: site_spread = 1.0_r8
+  real(r8), parameter :: site_spread = 0.0_r8
 
   ! phenology - prescribed leaf-on/leaf-off day of year (cold-deciduous PFTs only;
   ! see DailyPhenology). Illustrative Northern-Hemisphere mid-latitude timing, not
@@ -229,63 +229,61 @@ program FatesSingleCohort
   call FatesGlobalsInit(6, .false.)
   call TransferRadParams()
   
-  print *, dinc_vai, nlevleaf
+  ! derive the organ_id -> parameter-file-index reverse lookup map
+  ! (prt_params%organ_param_id) - normally done by the host model's own interface
+  ! setup (FatesInterfaceMod.F90), which this standalone driver bypasses entirely
+  call PRTDerivedParams()
 
-  ! ! derive the organ_id -> parameter-file-index reverse lookup map
-  ! ! (prt_params%organ_param_id) - normally done by the host model's own interface
-  ! ! setup (FatesInterfaceMod.F90), which this standalone driver bypasses entirely
-  ! call PRTDerivedParams()
+  ! host-model-namelist-controlled leaf biophysics switches
+  lb_params%electron_transport_model = FvCB1980 ! Farquhar-von Caemmerer-Berry (1980)
+  lb_params%stomatal_model           = medlyn_model
+  lb_params%stomatal_assim_model     = net_assim_model
+  lb_params%photo_tempsens_model     = photosynth_acclim_model_kumarathunge_etal_2019
 
-  ! ! host-model-namelist-controlled leaf biophysics switches
-  ! lb_params%electron_transport_model = FvCB1980 ! Farquhar-von Caemmerer-Berry (1980)
-  ! lb_params%stomatal_model           = medlyn_model
-  ! lb_params%stomatal_assim_model     = net_assim_model
-  ! lb_params%photo_tempsens_model     = photosynth_acclim_model_kumarathunge_etal_2019
+  ! host-model-namelist-controlled carbon-starvation mortality model - matches
+  ! CTSM's fates_cstarvation_model default ('linear', bld/namelist_files/
+  ! namelist_defaults_ctsm.xml)
+  hlm_mort_cstarvation_model = cstarvation_model_lin
 
-  ! ! host-model-namelist-controlled carbon-starvation mortality model - matches
-  ! ! CTSM's fates_cstarvation_model default ('linear', bld/namelist_files/
-  ! ! namelist_defaults_ctsm.xml)
-  ! hlm_mort_cstarvation_model = cstarvation_model_lin
+  ! leaf N content - constant for the whole run
+  lnc_top = prt_params%nitr_stoich_p1(pft, prt_params%organ_param_id(leaf_organ)) / &
+    prt_params%slatop(pft)
 
-  ! ! leaf N content - constant for the whole run
-  ! lnc_top = prt_params%nitr_stoich_p1(pft, prt_params%organ_param_id(leaf_organ)) / &
-  !   prt_params%slatop(pft)
+  ! recruitment-size initialization: start every light level's cohort at the diameter
+  ! implied by this PFT's minimum (sapling) recruitment height
+  call h2d_allom(EDPftvarcon_inst%hgt_min(pft), pft, dbh_recruit)
 
-  ! ! recruitment-size initialization: start every light level's cohort at the diameter
-  ! ! implied by this PFT's minimum (sapling) recruitment height
-  ! call h2d_allom(EDPftvarcon_inst%hgt_min(pft), pft, dbh_recruit)
+  ! build the log-spaced incident light fractions to sweep
+  allocate(light_frac(n_light_levels))
+  do ilight = 1, n_light_levels
+    light_frac(ilight) = light_frac_min * (light_frac_max/light_frac_min) **      &
+      (real(ilight - 1, r8)/real(n_light_levels - 1, r8))
+  end do
 
-  ! ! build the log-spaced incident light fractions to sweep
-  ! allocate(light_frac(n_light_levels))
-  ! do ilight = 1, n_light_levels
-  !   light_frac(ilight) = light_frac_min * (light_frac_max/light_frac_min) **      &
-  !     (real(ilight - 1, r8)/real(n_light_levels - 1, r8))
-  ! end do
+  ! build the log-spaced diagnostic PPFD sweep (see the parameter block above
+  ! for why ppfd_diagnostic_min is set where it is)
+  block
+    integer :: ippfd
+    allocate(diagnostic_ppfd(n_ppfd_diagnostic))
+    do ippfd = 1, n_ppfd_diagnostic
+      diagnostic_ppfd(ippfd) = ppfd_diagnostic_min *                             &
+        (ppfd_diagnostic_max/ppfd_diagnostic_min) **                             &
+        (real(ippfd - 1, r8)/real(n_ppfd_diagnostic - 1, r8))
+    end do
+  end block
 
-  ! ! build the log-spaced diagnostic PPFD sweep (see the parameter block above
-  ! ! for why ppfd_diagnostic_min is set where it is)
-  ! block
-  !   integer :: ippfd
-  !   allocate(diagnostic_ppfd(n_ppfd_diagnostic))
-  !   do ippfd = 1, n_ppfd_diagnostic
-  !     diagnostic_ppfd(ippfd) = ppfd_diagnostic_min *                             &
-  !       (ppfd_diagnostic_max/ppfd_diagnostic_min) **                             &
-  !       (real(ippfd - 1, r8)/real(n_ppfd_diagnostic - 1, r8))
-  !   end do
-  ! end block
+  n_photo_calls_total = 0
+  n_bisection_calls_total = 0
+  max_solve_iter_total = 0
 
-  ! n_photo_calls_total = 0
-  ! n_bisection_calls_total = 0
-  ! max_solve_iter_total = 0
+  ! main light-level sweep: each level is an independent trajectory from recruitment size
+  do ilight = 1, n_light_levels
+    call RunOneLightLevel(light_frac(ilight), ilight)
+  end do
 
-  ! ! main light-level sweep: each level is an independent trajectory from recruitment size
-  ! do ilight = 1, n_light_levels
-  !   call RunOneLightLevel(light_frac(ilight), ilight)
-  ! end do
-
-  ! ! write out the daily whole-cohort time series and the annual light-profile
-  ! ! snapshot, both across the light sweep
-  ! call hist%Write(out_file, light_frac, diagnostic_ppfd)
+  ! write out the daily whole-cohort time series and the annual light-profile
+  ! snapshot, both across the light sweep
+  call hist%Write(out_file, light_frac, diagnostic_ppfd)
 
 contains
 
@@ -418,9 +416,11 @@ contains
           ! absorbed PAR vs. incident PAR at the top of the crown, integrated
           ! over the day and taken as a ratio once the day is done (below) -
           ! avoids a 0/0 division at night, when both sums are simply 0
-          daily_absorbed_par = daily_absorbed_par +                              &
-            sum(light_env%parsun_z(:) + light_env%parsha_z(:)) * step_size
-          daily_incident_par = daily_incident_par + par_toc * step_size
+          if (light_env%treelai > nearzero) then 
+            daily_absorbed_par = daily_absorbed_par +                              &
+              sum(light_env%parsun_z(:) + light_env%parsha_z(:)) / light_env%treelai * step_size
+            daily_incident_par = daily_incident_par + par_toc * step_size
+          end if
 
           ! instantaneous whole-plant light-response diagnostic: one snapshot per
           ! year (first day, solar noon - matching RecordLightProfile's existing
@@ -737,7 +737,7 @@ contains
       call light_env%AttenuateCanopy(par_beam, par_diff, sweep_coszen,          &
         parsun_z, parsha_z, laisun_z, laisha_z)
       call phys%GrossAssimAndResp(cohort, pft, env, parsun_z, parsha_z,        &
-        laisun_z, laisha_z, step_size, gross_assim(ippfd), total_resp(ippfd))
+        laisun_z, laisha_z, 1.0_r8, step_size, gross_assim(ippfd), total_resp(ippfd))
     end do
 
     deallocate(parsun_z, parsha_z, laisun_z, laisha_z)
