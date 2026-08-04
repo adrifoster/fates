@@ -206,7 +206,7 @@ module FatesFactoryMod
   !---------------------------------------------------------------------------------------
   
   subroutine CohortFactory(cohort, pft, can_lai, dbh, number, crown_damage, status, age,         &
-    canopy_trim, canopy_layer, elong_factor, patch_area)
+    canopy_trim, canopy_layer, elong_factor, patch_area, site_spread)
     !
     ! DESCRIPTION:
     ! Create a FATES cohort
@@ -225,6 +225,7 @@ module FatesFactoryMod
     integer,                          intent(in), optional :: canopy_layer ! canopy layer
     real(r8),                         intent(in), optional :: elong_factor ! site-level elongation factor
     real(r8),                         intent(in), optional :: patch_area   ! patch area [m2]
+    real(r8),                         intent(in), optional :: site_spread  ! site spread
     
     ! LOCALS:
     class(prt_vartypes), pointer :: prt                ! PARTEH object
@@ -237,6 +238,7 @@ module FatesFactoryMod
     real(r8)                     :: age_local          ! local age [yrs]
     real(r8)                     :: elong_fact_local   ! local elongation factor
     real(r8)                     :: patch_area_local   ! local patch area [m2]
+    real(r8)                     :: site_spread_local  ! local site spread factor
     real(r8)                     :: height             ! height [m]
     real(r8)                     :: can_area           ! canopy area [m2]
     real(r8)                     :: c_struct           ! structural carbon [kgC]
@@ -310,6 +312,12 @@ module FatesFactoryMod
       canopy_layer_local = canopy_layer_default 
     end if
     
+    if (present(site_spread)) then
+      site_spread_local = site_spread
+    else
+      site_spread_local = init_spread_inventory
+    end if
+    
     ! set leaf elongation factors
     phen_select: select case (prt_params%phen_leaf_habit(pft))
     case (ihard_season_decid)
@@ -349,7 +357,7 @@ module FatesFactoryMod
     
     else 
       
-      call carea_allom(dbh_local, 1.0_r8, init_spread_inventory, pft, crown_damage_local,  &
+      call carea_allom(dbh_local, 1.0_r8, site_spread_local, pft, crown_damage_local,  &
         can_area)
     
       ! calculate initial density required to close the canopy
@@ -361,7 +369,7 @@ module FatesFactoryMod
     call bleaf(dbh_local, pft, crown_damage_local, canopy_trim_local, elongf_leaf, c_leaf)
     
     ! recalculate crown area
-    call carea_allom(dbh_local, number_local, init_spread_inventory, pft,                &
+    call carea_allom(dbh_local, number_local, site_spread_local, pft,                &
       crown_damage_local, can_area)
     
     ! calculate height  
@@ -393,7 +401,7 @@ module FatesFactoryMod
     ! create the cohort
     call cohort%Create(prt, pft, number_local, height, age_local, dbh_local,             &
       status_local, canopy_trim_local, can_area, canopy_layer_local, crown_damage_local, &
-      init_spread_inventory, can_lai, elongf_leaf, elongf_fnrt, elongf_stem)
+      site_spread_local, can_lai, elongf_leaf, elongf_fnrt, elongf_stem)
   
   end subroutine CohortFactory
   
