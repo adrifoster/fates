@@ -80,6 +80,16 @@ program FatesSingleCohort
   !     sapwood/structure), npp_acc as handed to PARTEH (net of growth
   !     respiration), and the carbon starvation mortality rate (cmort,
   !     indiv/year). daily_net_c is also kept as a convenience total.
+  !     daily_absorbed_par_indiv (whole-plant absorbed PAR per individual, Onoda
+  !     et al. 2013's Phi) is also recorded here - the light sweep's light_frac
+  !     stands in for a tree's competitive light environment/social position
+  !     (Onoda's actual metric comes from trees at different canopy heights in a
+  !     real light gradient; here light_frac plays that role instead), and
+  !     Phi/LA, Phi/M (LIE_LA/LIE_M) and biomass increment/Phi (LUE) are all left
+  !     to post-processing against this plus the already-recorded
+  !     treelai/crown_area/n/carbon-pool time series - see
+  !     daily_absorbed_par_indiv's declaration in RunOneLightLevel for why M is
+  !     not fixed to a specific pool combination here.
   !   - A per-leaf-layer light profile (parsun_z/parsha_z/laisun_z/laisha_z),
   !     dimensioned (nlevleaf, year, light_level), captured once per year (the first
   !     day of each year, at the sub-daily step nearest solar noon - matching
@@ -93,7 +103,35 @@ program FatesSingleCohort
   !   - An instantaneous whole-plant light-response diagnostic (gross_assim/
   !     total_resp, via LightResponseSweep), dimensioned (ppfd, year, light_level),
   !     captured at the same once-per-year cadence as the light profile above -
-  !     see LightResponseSweep's header comment for the method.
+  !     see LightResponseSweep's header comment for the method. LCPplant (Sterck
+  !     et al. 2013) is the PPFD at which gross_assim - total_resp crosses zero
+  !     along this swept array - post-processing, not a driver output.
+  !   - A companion leaf-level light-response diagnostic (leaf_anet, via
+  !     FatesTestCohortPhysMod's LeafNetAssimSweep), dimensioned (ppfd, year,
+  !     light_level), at the same cadence - swept directly onto a single canopy
+  !     layer (leaf_lcp_layer) with no canopy attenuation, unlike the whole-plant
+  !     diagnostic above. LCPleaf (Sterck et al. 2013) is the PPFD at which
+  !     leaf_anet crosses zero along this array.
+  !
+  ! COMMAND LINE: ./SingleCohort_exe <parameter_file.json> [reduced_output] [out_file.nc]
+  ! The optional second argument, if the literal string 'reduced_output', skips
+  ! everything but the variables needed for the shade-tolerance metric set
+  ! (LCPplant/LCPleaf/LIE/LIE_LA/LIE_M/LUE/the dbh-growth-floor edge - see
+  ! FatesTestHistoryMod.F90's module header for the full list) - meant for the
+  ! eventual Morris/LHC parameter sweep, where per-run file size/write time
+  ! compound across thousands of draws. Omitting it (the default, and every
+  ! existing invocation of this driver) writes the full diagnostic suite.
+  ! The two modes default to DIFFERENT output filenames (single_cohort_out.nc
+  ! vs. single_cohort_out_reduced.nc, see out_file's assignment below) - not
+  ! one shared name - so a stale file from a manual run in one mode can never
+  ! be silently mistaken for the other by single_cohort_test.py.
+  !
+  ! The optional third argument overrides the output filename outright
+  ! (regardless of mode) - to supply this, the second argument must also be
+  ! given (command-line arguments are positional; there is no way to skip
+  ! straight to the third). run_parameter_sweep.py uses this to put every
+  ! draw's output in one shared directory with a uniquely-named file, rather
+  ! than needing a unique working directory per draw.
   !
 
   use FatesConstantsMod,           only : r8 => fates_r8
@@ -143,11 +181,13 @@ program FatesSingleCohort
   use LeafBiophysicsMod,           only : net_assim_model, photosynth_acclim_model_kumarathunge_etal_2019
   use LeafBiophysicsMod,           only : LowstorageMainRespReduction
   use EDParamsMod               , only : dinc_vai
+  use FatesRadiationMemMod,        only : ipar
 
   implicit none
 
   ! LOCALS:
   character(len=:), allocatable    :: param_file    ! input parameter file
+  logical                          :: reduced_output ! optional 2nd command-line arg ('reduced_output'): skip everything but the shade-tolerance metric set (see FatesTestHistoryMod.F90's module header) - for the eventual Morris/LHC parameter sweep, where per-run file size/write time compound across thousands of draws. Defaults to full output, matching every existing invocation of this driver
   type(environment_type)           :: env           ! prescribed atmospheric/soil boundary conditions - re-Init'd fresh per light level (see RunOneLightLevel): the annual/diurnal temperature cycle is a deterministic function of day/hour, but its T_growth/T_home running-mean bookkeeping needs to restart at each light level's day 1
   type(history_type)               :: hist          ! output accumulator/writer, shared across the light sweep
   real(r8)                         :: dbh_recruit   ! recruitment-size dbh [cm]
@@ -158,6 +198,12 @@ program FatesSingleCohort
   ! leaf N content - constant for the whole run since the atmospheric boundary
   ! conditions never change
   real(r8) :: lnc_top ! leaf N content at the canopy top [gN/m2 leaf]
+
+  ! PFT PAR absorptance - constant for the whole run (pft never changes); used to
+  ! normalize light_intercept_eff (see RunOneLightLevel) to Sterck et al. (2013)'s
+  ! zero-self-shading asymptote of 1.0, rather than leaving it capped at the
+  ! leaf's own absorptance
+  real(r8) :: par_absorptance ! PFT fractional PAR absorptance, 1 - rhol(ipar) - taul(ipar) [-]
 
   ! Ci-solver diagnostics: LeafLayerPhotosynthesis's Newton loop bails out to the
   ! much more expensive CiBisection after newton_max_iters - default parameters
@@ -202,6 +248,13 @@ program FatesSingleCohort
   real(r8), parameter :: ppfd_diagnostic_min = 0.01_r8   ! lowest swept PPFD [umol/m2/s]
   real(r8), parameter :: ppfd_diagnostic_max = 2000.0_r8 ! highest swept PPFD [umol/m2/s] (~full sun)
 
+  ! leaf-level light-response diagnostic (LeafNetAssimSweep) - same PPFD sweep
+  ! and once-per-year cadence as the whole-plant diagnostic above, but swept
+  ! directly onto a single canopy layer with no canopy attenuation (Sterck et
+  ! al. 2013's LCPleaf protocol). iv=1 (top of crown) is a documented
+  ! assumption about canopy position - see LeafNetAssimSweep's header comment
+  integer, parameter :: leaf_lcp_layer = 1 ! canopy layer swept for the leaf-level (LCPleaf) diagnostic
+
   ! time stepping
   integer,  parameter :: n_substeps_per_day = 24                     ! sub-daily steps per day (hourly)
   real(r8), parameter :: step_size = 86400.0_r8/n_substeps_per_day   ! model time step [s]
@@ -210,11 +263,39 @@ program FatesSingleCohort
   integer,  parameter :: n_days_total = nyears * days_per_year       ! total days per light level's trajectory
   integer,  parameter :: noon_substep = n_substeps_per_day/2 + 1     ! sub-daily index nearest solar noon (hour 12.5 of 24 hourly substeps) - matches single_cohort_test.py's _NOON_HOUR_IDX convention
 
-  ! output file
-  character(len=*), parameter :: out_file = 'single_cohort_out.nc' ! output file
+  ! output file - set below, once reduced_output is known (see its assignment)
+  character(len=:), allocatable :: out_file
 
   ! read in parameter file name from command line
   param_file = command_line_arg(1)
+
+  ! optional 2nd command-line argument: switches the history writer to
+  ! reduced_output mode (see reduced_output's declaration above). command_line_arg
+  ! itself calls abort() if asked for an argument beyond what was actually
+  ! supplied, so command_argument_count() (a standard Fortran intrinsic) is
+  ! checked first rather than simply trying command_line_arg(2)
+  reduced_output = .false.
+  if (command_argument_count() >= 2) then
+    reduced_output = (trim(command_line_arg(2)) == 'reduced_output')
+  end if
+
+  ! output file - a distinct default name per mode (rather than one shared
+  ! name for both), so a stale reduced_output file left over from a previous
+  ! manual run can never be silently mistaken for the full-output file
+  ! plot_output expects (single_cohort_test.py checks for exactly this
+  ! filename before opening it - see its module header comment). Overridable
+  ! via an optional 3rd command-line argument (see reduced_output's comment
+  ! for why command_argument_count() is checked first) - lets an external
+  ! parameter-sweep driver (run_parameter_sweep.py) put every draw's output
+  ! in one shared directory with uniquely-named files, rather than needing a
+  ! unique working directory per draw
+  if (command_argument_count() >= 3) then
+    out_file = trim(command_line_arg(3))
+  else if (reduced_output) then
+    out_file = 'single_cohort_out_reduced.nc'
+  else
+    out_file = 'single_cohort_out.nc'
+  end if
 
   ! read in parameter file
   call ReadParameters(param_file)
@@ -248,6 +329,10 @@ program FatesSingleCohort
   ! leaf N content - constant for the whole run
   lnc_top = prt_params%nitr_stoich_p1(pft, prt_params%organ_param_id(leaf_organ)) / &
     prt_params%slatop(pft)
+
+  ! PFT PAR absorptance - constant for the whole run - see par_absorptance's
+  ! declaration above for why light_intercept_eff needs it
+  par_absorptance = 1.0_r8 - EDPftvarcon_inst%rhol(pft,ipar) - EDPftvarcon_inst%taul(pft,ipar)
 
   ! recruitment-size initialization: start every light level's cohort at the diameter
   ! implied by this PFT's minimum (sapling) recruitment height
@@ -325,10 +410,12 @@ contains
     real(r8) :: mean_solve_iter ! this light level's mean Ci-solver iteration count (sum_solve_iter/n_photo_calls), computed once at the end of this trajectory
     real(r8) :: diagnostic_gross_assim(n_ppfd_diagnostic) ! this year's LightResponseSweep gross-assimilation output [kgC/indiv/s]
     real(r8) :: diagnostic_total_resp(n_ppfd_diagnostic)  ! this year's LightResponseSweep total-respiration output [kgC/indiv/s]
+    real(r8) :: diagnostic_leaf_anet(n_ppfd_diagnostic)   ! this year's LeafNetAssimSweep leaf-level net-photosynthesis output [umolC/m2 leaf/s]
     real(r8) :: par_toc               ! this substep's incident PAR at the top of the crown [W/m2], from light_env%Profile
-    real(r8) :: daily_absorbed_par    ! whole-plant absorbed PAR (parsun_z+parsha_z summed over layers), integrated over the day [J/m2 ground] (reset each day)
+    real(r8) :: daily_absorbed_par    ! whole-plant absorbed PAR (parsun_z+parsha_z summed over layers), per unit leaf area, integrated over the day [J/m2 leaf] (reset each day)
     real(r8) :: daily_incident_par    ! incident PAR at the top of the crown, integrated over the day [J/m2 ground] (reset each day)
-    real(r8) :: light_intercept_eff   ! today's light interception efficiency: daily_absorbed_par/daily_incident_par [-] (Sterck et al. 2013) - crown_area cancels out of both the numerator and denominator of "whole-plant absorbed PAR / (incident PAR at top of crown x crown area)", since parsun_z/parsha_z/par_toc are all already per-unit-ground-area and crown_area would multiply through both sides identically
+    real(r8) :: daily_absorbed_par_indiv ! whole-plant absorbed PAR per individual, integrated over the day [J/indiv/day] (reset each day) - Onoda et al. (2013)'s Phi (light intercepted per plant per unit time), the numerator of their LIE_M (Phi/M, light interception efficiency per unit above-ground biomass), LIE_LA (Phi/LA, per unit leaf area - equal to daily_absorbed_par above once both are put on a per-individual basis: daily_absorbed_par = this / (treelai*crown_area/n)) and LUE (biomass increment/Phi) metrics - all three left to post-processing from this plus the already-recorded treelai/crown_area/n/leaf_c/fnrt_c/sapw_c/struct_c/storage_c time series, since FATES does not cleanly expose an above-ground-only biomass split for struct_c the way Onoda's M excludes fine roots
+    real(r8) :: light_intercept_eff   ! today's light interception efficiency: daily_absorbed_par/(daily_incident_par*par_absorptance) [-] (Sterck et al. 2013) - crown_area cancels out of both the numerator and denominator of "whole-plant absorbed PAR / (incident PAR at top of crown x crown area)", since parsun_z/parsha_z/par_toc are all already per-unit-ground-area and crown_area would multiply through both sides identically. The par_absorptance divisor normalizes the reference (denominator) to a horizontal surface with the same leaf material - i.e. absorbing, not merely intercepting, the incident PAR - so this ratio approaches 1.0 (not the PFT's bare absorptance) as self-shading vanishes, matching Sterck et al. (2013)'s reported LIE values approaching ~0.9-1.0 for minimally self-shaded plants
     real(r8) :: maintresp_reduction_factor ! today's storage-based maintenance-respiration throttle [0-1], recomputed here via the same LowstorageMainRespReduction(frac_store, pft, ...) call phys%DailySetup already made internally (not read off phys, which keeps it private) - deterministic given frac_store, so bit-identical
 
     n_photo_calls = 0
@@ -355,7 +442,8 @@ contains
 
     ! allocate the history arrays once, from the first light level
     if (ilight == 1) then
-      call hist%Init(n_days_total, nlevleaf, n_light_levels, nyears, n_ppfd_diagnostic)
+      call hist%Init(n_days_total, nlevleaf, n_light_levels, nyears,          &
+        n_ppfd_diagnostic, reduced_output)
     end if
 
     do iyear = 1, nyears
@@ -371,6 +459,7 @@ contains
         daily_froot_mr = 0.0_r8
         daily_absorbed_par = 0.0_r8
         daily_incident_par = 0.0_r8
+        daily_absorbed_par_indiv = 0.0_r8
 
         ! once-per-day setup: MR throttle, sapwood/fine-root N, and the per-layer
         ! nitrogen-scaling factor (see FatesTestCohortPhysMod)
@@ -413,13 +502,21 @@ contains
             gpp_tstep, rdark_tstep, nonleaf_mr_tstep)
 
           ! light interception efficiency (Sterck et al. 2013): whole-plant
-          ! absorbed PAR vs. incident PAR at the top of the crown, integrated
-          ! over the day and taken as a ratio once the day is done (below) -
-          ! avoids a 0/0 division at night, when both sums are simply 0
-          if (light_env%treelai > nearzero) then 
+          ! absorbed PAR vs. absorbed PAR of an equal-leaf-area, zero-self-
+          ! shading reference surface, integrated over the day and taken as a
+          ! ratio once the day is done (below, with the par_absorptance
+          ! normalization applied there) - avoids a 0/0 division at night, when
+          ! both sums are simply 0. daily_absorbed_par_indiv (Onoda et al. 2013's
+          ! Phi) is accumulated alongside it, on a per-individual rather than
+          ! per-leaf-area basis: parsun_z/parsha_z are per unit ground area, so
+          ! scaling by crown_area/n here matches how gpp_tstep is scaled up to a
+          ! per-individual flux in FatesTestCohortPhysMod's SubdailyStep
+          if (light_env%treelai > nearzero) then
             daily_absorbed_par = daily_absorbed_par +                              &
               sum(light_env%parsun_z(:) + light_env%parsha_z(:)) / light_env%treelai * step_size
             daily_incident_par = daily_incident_par + par_toc * step_size
+            daily_absorbed_par_indiv = daily_absorbed_par_indiv +                  &
+              sum(light_env%parsun_z(:) + light_env%parsha_z(:)) * cohort%c_area / cohort%n * step_size
           end if
 
           ! instantaneous whole-plant light-response diagnostic: one snapshot per
@@ -434,6 +531,12 @@ contains
               diagnostic_gross_assim, diagnostic_total_resp)
             call hist%RecordLightResponse(iyear, ilight, diagnostic_gross_assim, &
               diagnostic_total_resp)
+
+            ! leaf-level (LCPleaf) companion diagnostic - see leaf_lcp_layer's
+            ! declaration and LeafNetAssimSweep's header comment
+            call phys%LeafNetAssimSweep(pft, env, diagnostic_ppfd,               &
+              leaf_lcp_layer, diagnostic_leaf_anet)
+            call hist%RecordLeafNetAssim(iyear, ilight, diagnostic_leaf_anet)
           end if
 
           ! daily net carbon = GPP - leaf dark resp - non-leaf MR, integrated over
@@ -452,10 +555,12 @@ contains
         end do
 
         ! today's light interception efficiency - see the header comment above
-        ! the sub-daily loop. daily_incident_par is 0 only if there is no
-        ! daylight at all today, which never happens at this driver's latitude
+        ! the sub-daily loop, and par_absorptance's declaration, for why the
+        ! denominator carries the par_absorptance factor. daily_incident_par is
+        ! 0 only if there is no daylight at all today, which never happens at
+        ! this driver's latitude
         if (daily_incident_par > nearzero) then
-          light_intercept_eff = daily_absorbed_par / daily_incident_par
+          light_intercept_eff = daily_absorbed_par / (daily_incident_par * par_absorptance)
         else
           light_intercept_eff = 0.0_r8
         end if
@@ -496,7 +601,7 @@ contains
           daily_rdark, daily_livestem_mr, daily_livecroot_mr, daily_froot_mr,      &
           growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,                &
           struct_turnover, npp_acc_to_prt, frac_store, cmort,                      &
-          light_intercept_eff, maintresp_reduction_factor)
+          light_intercept_eff, maintresp_reduction_factor, daily_absorbed_par_indiv)
 
       end do
 

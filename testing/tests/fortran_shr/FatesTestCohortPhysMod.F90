@@ -68,6 +68,7 @@ module FatesTestCohortPhysMod
      procedure, public :: DailySetup
      procedure, public :: SubdailyStep
      procedure, public :: GrossAssimAndResp
+     procedure, public :: LeafNetAssimSweep
 
   end type cohort_phys_type
 
@@ -432,5 +433,62 @@ contains
       livestem_mr + livecroot_mr + froot_mr
 
   end subroutine GrossAssimAndResp
+
+  ! ==========================================================================
+
+  subroutine LeafNetAssimSweep(this, pft, env, ppfd_values, iv, anet)
+    !
+    ! DESCRIPTION:
+    ! Leaf-level light-response sweep at a single, fixed canopy position (iv),
+    ! evaluated at that layer's already-"frozen" capacity (vcmax_z/jmax_z/kp_z/
+    ! gs0_z/gs1_z/gs2_z/lmr_z, exactly as SubdailyStep left them). Unlike
+    ! GrossAssimAndResp (whole-plant assimilation integrated over a caller-
+    ! supplied, already-self-shaded canopy PAR profile), this sweeps a caller-
+    ! supplied incident PPFD directly onto one leaf layer's photosynthesis, with
+    ! no canopy attenuation or self-shading at all - this is Sterck et al.
+    ! (2013)'s LCPleaf protocol: an IRGA light-response curve on a single leaf,
+    ! giving Aarea (area-based net photosynthesis) as a function of PPFD
+    ! incident directly on that leaf, as opposed to LCPplant (GrossAssimAndResp/
+    ! LightResponseSweep), where the swept PPFD is whole-canopy incident and
+    ! self-shading is resolved by the two-stream solver before reaching each
+    ! layer.
+    !
+    ! iv=1 (top of crown) is the natural choice of canopy position for the
+    ! caller to pass, since nscaler_z(1) is calibrated to (almost) zero
+    ! cumulative LAI above it - this driver has not been checked against Sterck
+    ! et al. (2013)'s actual IRGA measurement protocol (which leaf age/canopy
+    ! position they sampled), so that choice is a documented assumption, not a
+    ! confirmed match.
+
+    ! ARGUMENTS:
+    class(cohort_phys_type), intent(in)  :: this          ! cohort physiology object (read-only: today's already-computed capacity)
+    integer,                  intent(in)  :: pft            ! plant functional type index
+    type(environment_type),  intent(in)  :: env            ! prescribed atmospheric/soil boundary conditions
+    real(r8),                 intent(in)  :: ppfd_values(:) ! incident PPFD values swept directly onto the leaf, no canopy attenuation [umol photons/m2 leaf/s]
+    integer,                  intent(in)  :: iv             ! canopy layer to evaluate at (1 = top of crown - see header comment)
+    real(r8),                 intent(out) :: anet(:)        ! leaf-level net photosynthesis (Aarea) at each swept PPFD [umolC/m2 leaf/s], size(ppfd_values)
+
+    ! LOCALS:
+    real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point at env%tempk [Pa]
+    real(r8) :: agross     ! gross photosynthesis (unused diagnostic here - see anet) [umolC/m2 leaf/s]
+    real(r8) :: gs         ! stomatal conductance (unused diagnostic)
+    real(r8) :: ci         ! intracellular CO2 (unused diagnostic) [Pa]
+    real(r8) :: c13disc    ! carbon-13 discrimination (unused diagnostic)
+    integer  :: solve_iter ! Ci-solver iteration count (unused diagnostic here - see SubdailyStep for the tracked version)
+    integer  :: ippfd      ! PPFD-sweep looping index
+
+    call GetCanopyGasParameters(env%can_press, env%can_o2_ppress, env%tempk,    &
+      mm_kco2, mm_ko2, co2_cpoint)
+
+    do ippfd = 1, size(ppfd_values)
+      call LeafLayerPhotosynthesis(ppfd_values(ippfd), pft, this%vcmax_z(iv),   &
+        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),        &
+        this%gs2_z(iv), env%tempk, env%can_press, env%can_co2_ppress,          &
+        env%can_o2_ppress, env%veg_esat, env%gb, env%can_vpress, mm_kco2,      &
+        mm_ko2, co2_cpoint, this%lmr_z(iv), ci_tol, agross, gs, anet(ippfd),   &
+        c13disc, ci, solve_iter)
+    end do
+
+  end subroutine LeafNetAssimSweep
 
 end module FatesTestCohortPhysMod
