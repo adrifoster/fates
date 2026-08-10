@@ -41,6 +41,7 @@ program FatesTestLeafLevelPhoto
   use EDPftvarcon,                 only : EDPftvarcon_inst
   use PRTParametersMod,            only : prt_params
   use PRTInitParamsFatesMod,       only : PRTDerivedParams
+  use FatesParameterDerivedMod,    only : param_derived
   use FatesUnitTestParamReaderMod, only : ReadParameters
   use FatesArgumentUtils,          only : command_line_arg
   use FatesFactoryMod,             only : InitializeGlobals
@@ -62,6 +63,9 @@ program FatesTestLeafLevelPhoto
   character(len=:), allocatable :: param_file ! input parameter file
   type(environment_type)        :: env        ! prescribed atmospheric boundary conditions
   real(r8), allocatable         :: lnc_top(:)  ! leaf N content at the canopy top, per pft [gN/m2 leaf]
+  real(r8) :: vcmax25top_pft ! reference (25C, canopy-top) maximum carboxylation rate, target_pft's flat PFT default [umol/m2/s]
+  real(r8) :: jmax25top_pft  ! reference (25C, canopy-top) maximum electron transport rate, target_pft's flat PFT default [umol/m2/s]
+  real(r8) :: kp25top_pft    ! reference (25C, canopy-top) initial slope of C4 CO2 response, target_pft's flat PFT default [umol/m2/s]
 
   ! swept-variable value arrays
   real(r8), allocatable :: par_vals(:)      ! swept PAR values [umol/m2/s]
@@ -88,33 +92,31 @@ program FatesTestLeafLevelPhoto
   integer :: n_par, n_co2, n_vpd, n_temp, n_soilfrac ! sweep array sizes
   integer :: i ! looping index
 
-  ! background CO2/O2 partial pressures at the default reference condition -
-  ! derived below (once env%can_press is known) from the mole-fraction
-  ! parameters, and held fixed across every sweep except the CO2 sweep itself
-  real(r8) :: default_co2_ppress ! [Pa]
-  real(r8) :: default_o2_ppress  ! [Pa]
-
   ! target_pft's soil matric potential thresholds (mm, negative), read from
   ! the parameter file below and used only by the soil water content sweep
   real(r8) :: smpsc_pft ! soil matric potential at full stomatal closure [mm]
   real(r8) :: smpso_pft ! soil matric potential at full stomatal opening [mm]
 
   ! CONSTANTS:
+  ! PFT 6 is broadleaf_colddecid_extratrop_tree, matching Rogers et al.
+  ! (2017)'s stated "generic temperate broad leaved deciduous tree".
+  ! test_CanopyLevelPhoto.F90 uses this same PFT so the leaf and canopy
+  ! panels describe the same plant and can be shown as a pair - see that
+  ! file's header for why the choice matters much more at canopy scale
+  integer, parameter :: target_pft = 6 ! PFT index to evaluate (1-based)
 
-  integer, parameter :: target_pft = 1 ! PFT index to evaluate (1-based)
-
-  ! default reference conditions
+  ! default reference conditions - CO2/O2/dayl_factor/btran come from
+  ! FatesTestEnvironmentMod's shared reference-atmosphere defaults (env%Init,
+  ! below) rather than being duplicated here; this test's own defaults are
+  ! only the ones genuinely specific to it (leaf temperature/VPD, both fixed
+  ! independently of env's site-climatology/RH-driven state, and nscaler,
+  ! which env has no equivalent of)
   real(r8), parameter :: default_veg_tempk   = 25.0_r8 + t_water_freeze_k_1atm ! [K]
   real(r8), parameter :: default_vpd         = 1000.0_r8  ! [Pa] leaf-to-air VPD, esat(Tleaf) - eair
-  real(r8), parameter :: default_co2_molfrac = 380.0e-6_r8 ! [mol/mol] (380 umol/mol)
-  real(r8), parameter :: default_o2_molfrac  = 210.0e-3_r8 ! [mol/mol] (210 mmol/mol)
   real(r8), parameter :: default_par         = 1500.0_r8  ! [umol/m2/s]
   real(r8), parameter :: default_nscaler     = 1.0_r8     ! [0-1]
-  real(r8), parameter :: default_dayl_fact   = 1.0_r8     ! [0-1]
-  real(r8), parameter :: default_btran       = 1.0_r8     ! [0-1]
 
-  ! sweep ranges - unchanged from the original test, except max_par, temp range,
-  ! and co2 range
+  ! sweep ranges
   real(r8), parameter :: min_temp = 5.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
   real(r8), parameter :: min_par  = 0.0_r8,    max_par  = 1600.0_r8,  par_inc  = 5.0_r8   ! [umol/m2/s]
   real(r8), parameter :: min_vpd  = 500.0_r8,  max_vpd  = 2500.0_r8,  vpd_inc  = 20.0_r8  ! [Pa] (0.5-2.5 kPa)
@@ -122,7 +124,6 @@ program FatesTestLeafLevelPhoto
   real(r8), parameter :: soilfrac_inc = 0.02_r8 ! [0-1]
 
   character(len=*), parameter :: out_file = 'leaf_level_photo_out.nc' ! output file
-
 
   param_file = command_line_arg(1)
   call ReadParameters(param_file)
@@ -148,14 +149,17 @@ program FatesTestLeafLevelPhoto
   allocate(lnc_top(1))
   lnc_top(1) = LeafNitrogenContent(target_pft)
 
-  ! atmospheric constants not swept by this test (canopy pressure, leaf
-  ! boundary-layer conductance)
-  call env%Init()
+  ! reference (25C, canopy-top) photosynthetic capacity for target_pft - the
+  ! flat PFT default (no cohort/acclimation state exists in this driver) -
+  ! constant for the whole run
+  vcmax25top_pft = EDPftvarcon_inst%vcmax25top(target_pft,1)
+  jmax25top_pft  = param_derived%jmax25top(target_pft,1)
+  kp25top_pft    = param_derived%kp25top(target_pft,1)
 
-  ! fixed background CO2/O2 partial pressures at the default reference
-  ! condition, converted from mole fraction at prescribed canopy pressure
-  default_co2_ppress = default_co2_molfrac * env%can_press
-  default_o2_ppress  = default_o2_molfrac  * env%can_press
+  ! atmospheric constants not swept by this test (canopy pressure, background
+  ! CO2/O2 partial pressure, leaf boundary-layer conductance, dayl_factor,
+  ! btran - see FatesTestEnvironmentMod's shared reference-atmosphere defaults)
+  call env%Init()
 
   ! ---------------------------------------------------------------------------------------
   ! build the swept-value arrays
@@ -218,9 +222,10 @@ program FatesTestLeafLevelPhoto
     print *, 'Exercising leaf photosynthesis for PAR'
     do i = 1, n_par
       call EvaluateLeafPhotosynthesis(target_pft, par_vals(i), default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, default_co2_ppress, &
-        default_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
-        default_nscaler, default_dayl_fact, default_btran, lnc_top(1),           &
+        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
+        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
+        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
         agross_bypar(i,1), anet_bypar(i,1), gs_bypar(i,1), ci_bypar(i,1))
     end do
 
@@ -232,8 +237,9 @@ program FatesTestLeafLevelPhoto
     do i = 1, n_co2
       call EvaluateLeafPhotosynthesis(target_pft, default_par, default_veg_tempk, &
         default_veg_tempk, default_veg_tempk, env%can_press, co2_vals(i),        &
-        default_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
-        default_nscaler, default_dayl_fact, default_btran, lnc_top(1),           &
+        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
+        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
         agross_byco2(i,1), anet_byco2(i,1), gs_byco2(i,1), ci_byco2(i,1))
     end do
 
@@ -247,9 +253,10 @@ program FatesTestLeafLevelPhoto
       veg_esat_byvpd(i) = default_veg_esat
       can_vpress_byvpd(i) = default_veg_esat - vpd_vals(i)
       call EvaluateLeafPhotosynthesis(target_pft, default_par, default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, default_co2_ppress, &
-        default_o2_ppress, veg_esat_byvpd(i), can_vpress_byvpd(i), env%gb,       &
-        default_nscaler, default_dayl_fact, default_btran, lnc_top(1),           &
+        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
+        env%can_o2_ppress, veg_esat_byvpd(i), can_vpress_byvpd(i), env%gb,       &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
+        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
         agross_byvpd(i,1), anet_byvpd(i,1), gs_byvpd(i,1), ci_byvpd(i,1))
     end do
 
@@ -264,9 +271,10 @@ program FatesTestLeafLevelPhoto
       call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
       can_vpress_bytemp(i) = veg_esat_bytemp(i) - default_vpd
       call EvaluateLeafPhotosynthesis(target_pft, default_par, temp_vals(i),     &
-        default_veg_tempk, default_veg_tempk, env%can_press, default_co2_ppress, &
-        default_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
-        default_nscaler, default_dayl_fact, default_btran, lnc_top(1),          &
+        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
+        env%can_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
+        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
         agross_bytemp(i,1), anet_bytemp(i,1), gs_bytemp(i,1), ci_bytemp(i,1))
     end do
 
@@ -281,9 +289,10 @@ program FatesTestLeafLevelPhoto
       smp_node = max(smpsc_pft, smp)
       btran_bysoilfrac(i) = min((smp_node - smpsc_pft) / (smpso_pft - smpsc_pft), 1.0_r8)
       call EvaluateLeafPhotosynthesis(target_pft, default_par, default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, default_co2_ppress, &
-        default_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
-        default_nscaler, default_dayl_fact, btran_bysoilfrac(i), lnc_top(1),     &
+        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
+        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
+        default_nscaler, env%dayl_factor, btran_bysoilfrac(i), vcmax25top_pft,   &
+        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
         agross_bysoilfrac(i,1), anet_bysoilfrac(i,1), gs_bysoilfrac(i,1), ci_bysoilfrac(i,1))
     end do
   end block

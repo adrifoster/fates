@@ -113,7 +113,7 @@ program FatesSingleCohort
   !     diagnostic above. LCPleaf (Sterck et al. 2013) is the PPFD at which
   !     leaf_anet crosses zero along this array.
   !
-  ! COMMAND LINE: ./SingleCohort_exe <parameter_file.json> [reduced_output] [out_file.nc]
+  ! COMMAND LINE: ./SingleCohort_exe <parameter_file.json> [reduced_output] [out_file.nc] [site_namelist.nml]
   ! The optional second argument, if the literal string 'reduced_output', skips
   ! everything but the variables needed for the shade-tolerance metric set
   ! (LCPplant/LCPleaf/LIE/LIE_LA/LIE_M/LUE/the dbh-growth-floor edge - see
@@ -132,6 +132,15 @@ program FatesSingleCohort
   ! straight to the third). run_parameter_sweep.py uses this to put every
   ! draw's output in one shared directory with a uniquely-named file, rather
   ! than needing a unique working directory per draw.
+  !
+  ! The optional fourth argument is a path to a &fates_test_site namelist file
+  ! (see FatesTestSiteMod.F90's module header) that overrides some or all of
+  ! the driver's default BCI, Panama site descriptors (latitude, the annual/
+  ! diurnal temperature cycle, and relative humidity) - lets a "different
+  ! site" experiment be run without rebuilding. As with the third argument,
+  ! reaching this one requires the second and third to also be supplied
+  ! (positional arguments). Any variable the namelist file omits keeps its
+  ! BCI default.
   !
 
   use FatesConstantsMod,           only : r8 => fates_r8
@@ -172,15 +181,17 @@ program FatesSingleCohort
   use PRTGenericMod,               only : store_organ, carbon12_element
   use PRTInitParamsFatesMod,       only : PRTDerivedParams
   use FatesTwoStreamUtilsMod,      only : TransferRadParams
+  use FatesTestSiteMod,            only : ReadSiteNamelist
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesTestCohortPhysMod,      only : cohort_phys_type
   use FatesTestHistoryMod,         only : history_type
+  use FatesTestLeafPhotoMod,       only : LeafNitrogenContent
   use LeafBiophysicsMod,           only : lb_params
   use LeafBiophysicsMod,           only : FvCB1980, medlyn_model
   use LeafBiophysicsMod,           only : net_assim_model, photosynth_acclim_model_kumarathunge_etal_2019
   use LeafBiophysicsMod,           only : LowstorageMainRespReduction
-  use EDParamsMod               , only : dinc_vai
+  use EDParamsMod,                 only : dinc_vai
   use FatesRadiationMemMod,        only : ipar
 
   implicit none
@@ -188,6 +199,7 @@ program FatesSingleCohort
   ! LOCALS:
   character(len=:), allocatable    :: param_file    ! input parameter file
   logical                          :: reduced_output ! optional 2nd command-line arg ('reduced_output'): skip everything but the shade-tolerance metric set (see FatesTestHistoryMod.F90's module header) - for the eventual Morris/LHC parameter sweep, where per-run file size/write time compound across thousands of draws. Defaults to full output, matching every existing invocation of this driver
+  character(len=:), allocatable    :: site_namelist_file ! optional 4th command-line arg: path to a &fates_test_site namelist file (see FatesTestSiteMod.F90) overriding some or all of the BCI site defaults (latitude/temperature-cycle/humidity). Omitted by default, matching every existing invocation of this driver
   type(environment_type)           :: env           ! prescribed atmospheric/soil boundary conditions - re-Init'd fresh per light level (see RunOneLightLevel): the annual/diurnal temperature cycle is a deterministic function of day/hour, but its T_growth/T_home running-mean bookkeeping needs to restart at each light level's day 1
   type(history_type)               :: hist          ! output accumulator/writer, shared across the light sweep
   real(r8)                         :: dbh_recruit   ! recruitment-size dbh [cm]
@@ -299,17 +311,31 @@ program FatesSingleCohort
 
   ! read in parameter file
   call ReadParameters(param_file)
-  
+
   ! initialize global PRT/allometry data needed by the cohort machinery
   call InitializeGlobals(step_size)
 
   ! initialize FATES logging (the two-stream module's debug/error paths write to this
   ! unit and it is otherwise never set in a standalone driver) and the two-stream
   ! radiation parameters (leaf/stem optical properties, per pft)
-  numpft = size(prt_params%wood_density, dim=1)
   call FatesGlobalsInit(6, .false.)
   call TransferRadParams()
-  
+
+  ! optional 4th command-line argument: a &fates_test_site namelist file (see
+  ! FatesTestSiteMod.F90's module header) overriding some or all of the BCI
+  ! site defaults - read after FatesGlobalsInit (so ReadSiteNamelist's own
+  ! error path can log to fates_log()) but before anything below consults
+  ! latitude_deg/t_annual_mean/etc (env%Init and light_env%Init, both first
+  ! called inside RunOneLightLevel), so the override is in effect for the
+  ! whole run. Reaching this 4th argument requires the 2nd/3rd arguments to
+  ! also be supplied on the command line (arguments are positional) - pass
+  ! any string other than 'reduced_output' for the 2nd if full output is
+  ! wanted, and the desired out_file name for the 3rd
+  if (command_argument_count() >= 4) then
+    site_namelist_file = trim(command_line_arg(4))
+    call ReadSiteNamelist(site_namelist_file)
+  end if
+
   ! derive the organ_id -> parameter-file-index reverse lookup map
   ! (prt_params%organ_param_id) - normally done by the host model's own interface
   ! setup (FatesInterfaceMod.F90), which this standalone driver bypasses entirely
@@ -327,8 +353,7 @@ program FatesSingleCohort
   hlm_mort_cstarvation_model = cstarvation_model_lin
 
   ! leaf N content - constant for the whole run
-  lnc_top = prt_params%nitr_stoich_p1(pft, prt_params%organ_param_id(leaf_organ)) / &
-    prt_params%slatop(pft)
+  lnc_top = LeafNitrogenContent(pft)
 
   ! PFT PAR absorptance - constant for the whole run - see par_absorptance's
   ! declaration above for why light_intercept_eff needs it
@@ -432,7 +457,7 @@ contains
       patch_area=patch_area, age=coh_age, site_spread=site_spread)
     cohort%nv = GetNVegLayers(cohort%treelai + cohort%treesai)
 
-    call light_env%Init(cohort, pft)
+    call light_env%Init(cohort%treelai, cohort%treesai, cohort%height, pft)
 
     ! prescribed atmospheric/soil boundary conditions for this light level's
     ! trajectory (see FatesTestEnvironmentMod) - re-Init'd fresh per light level so
@@ -594,7 +619,7 @@ contains
         call carea_allom(cohort%dbh, cohort%n, site_spread, pft,         &
           cohort%crowndamage, cohort%c_area)
         call UpdateCohortLAI(cohort, can_tlai, patch_area)
-        call light_env%Refresh(cohort)
+        call light_env%Refresh(cohort%treelai, cohort%treesai, cohort%height)
 
         ! capture today's daily time series row
         call hist%RecordDay(iday_all, ilight, cohort, daily_net_c, daily_gpp,      &
