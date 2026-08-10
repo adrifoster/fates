@@ -27,6 +27,16 @@ module FatesTestEnvironmentMod
   ! LeafBiophysicsMod.F90), with no in-repo host-model code computing them, so
   ! there is no existing convention to reuse here.
   !
+  ! can_press/can_co2_ppress/can_o2_ppress/gb/dayl_factor/btran are this
+  ! module's consolidated reference-atmosphere defaults - the single source
+  ! every standalone driver (single_cohort, leaf_level_photo) shares, rather
+  ! than each independently hardcoding its own copy (which had drifted: this
+  ! module previously baked in ~420 ppm CO2/20.9% O2 while leaf_level_photo
+  ! independently computed 380 ppm/21.0%). See the default_* parameters below
+  ! Init - leaf_level_photo's original numbers were kept as the shared
+  ! default. Init's optional co2_molfrac argument is the override point for a
+  ! driver that deliberately needs to diverge (none currently do).
+  !
 
   use FatesConstantsMod, only : r8 => fates_r8
   use FatesConstantsMod, only : pi_const
@@ -42,6 +52,25 @@ module FatesTestEnvironmentMod
   private
 
   integer, parameter :: growth_window_days = 10 ! width of the T_growth running-mean window [days]
+
+  ! ------------------------------------------------------------------------------------
+  ! Shared reference-atmosphere defaults - the single source of truth for every
+  ! standalone test driver (single_cohort, leaf_level_photo), consolidated here
+  ! rather than each driver independently hardcoding its own copy. Values are
+  ! leaf_level_photo's original defaults (380 ppm CO2, 21.0% O2 - a literature-
+  ! standard ambient reference), not this module's own previous ~420 ppm/20.9%
+  ! guess. can_co2_ppress is exposed as a mole fraction, converted to partial
+  ! pressure at Init() time from the actual can_press, rather than a
+  ! hand-rounded partial-pressure constant that could silently drift out of
+  ! sync with can_press if it were ever changed. Init()'s optional co2_molfrac
+  ! argument is the only override point any driver currently needs; add
+  ! further optional arguments here (following the same pattern) if a driver
+  ! ever needs to deliberately diverge on one of the others
+  ! ------------------------------------------------------------------------------------
+  real(r8), public, parameter :: default_co2_molfrac = 380.0e-6_r8 ! [mol/mol] (380 umol/mol)
+  real(r8), public, parameter :: default_o2_molfrac  = 210.0e-3_r8 ! [mol/mol] (210 mmol/mol, 21.0%)
+  real(r8), public, parameter :: default_dayl_factor = 1.0_r8      ! [0-1] (no seasonal daylength change assumed)
+  real(r8), public, parameter :: default_btran       = 1.0_r8      ! [0-1] (non-limiting water assumed)
 
   type, public :: environment_type
 
@@ -81,7 +110,7 @@ contains
 
   ! ==========================================================================
 
-  subroutine Init(this)
+  subroutine Init(this, co2_molfrac)
     !
     ! DESCRIPTION:
     ! Set the prescribed atmospheric and soil boundary conditions, and reset the
@@ -91,16 +120,21 @@ contains
 
     ! ARGUMENTS:
     class(environment_type), intent(out) :: this ! environment object
+    real(r8), optional, intent(in) :: co2_molfrac ! override for can_co2_ppress's mole fraction [mol/mol]; defaults to default_co2_molfrac if omitted
 
     ! LOCALS:
-    real(r8) :: qs_dummy ! saturation specific humidity output from QSat (unused here)
+    real(r8) :: qs_dummy       ! saturation specific humidity output from QSat (unused here)
+    real(r8) :: co2_molfrac_local ! this call's actual CO2 mole fraction [mol/mol]
 
-    this%can_press     = 101325.0_r8 ! [Pa] (sea level)
-    this%can_co2_ppress = 42.6_r8    ! [Pa] (~420 ppm at can_press)
-    this%can_o2_ppress  = 21177.0_r8 ! [Pa] (20.9% at can_press)
-    this%gb            = 2.0e6_r8    ! [umol/m2/s] (well-ventilated leaf, ~20 s/m equivalent)
-    this%dayl_factor   = 1.0_r8      ! [0-1] (no seasonal daylength change assumed - distinct from the diurnal temperature/light cycles themselves)
-    this%btran         = 1.0_r8      ! [0-1] (non-limiting water assumed)
+    co2_molfrac_local = default_co2_molfrac
+    if (present(co2_molfrac)) co2_molfrac_local = co2_molfrac
+
+    this%can_press      = 101325.0_r8 ! [Pa] (sea level)
+    this%can_co2_ppress = co2_molfrac_local * this%can_press ! [Pa]
+    this%can_o2_ppress  = default_o2_molfrac * this%can_press ! [Pa]
+    this%gb            = 2.0e6_r8         ! [umol/m2/s] (well-ventilated leaf, ~20 s/m equivalent)
+    this%dayl_factor   = default_dayl_factor ! [0-1] (distinct from the diurnal temperature/light cycles themselves)
+    this%btran         = default_btran       ! [0-1]
     this%rootfr_ft     = 1.0_r8      ! [0-1]
     this%nlevsoil      = 1           ! matches rootfr_ft holding 100% of roots in one layer
 

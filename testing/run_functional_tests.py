@@ -260,8 +260,12 @@ def main():
         if test.plot:
             test.plot_output(run_dir, args.save_figs, run_dir / "plots" / test_name)
 
-    # show plots
-    plt.show()
+    # show plots interactively - skipped when --save-figs is given, since
+    # every plot_output call above already wrote its figures to disk in
+    # that case (see each test's plot_* methods) and this would otherwise
+    # block the run until every figure window is closed by hand
+    if not args.save_figs:
+        plt.show()
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ add_subdirectory(tests/functional/patch fates_patch_ftest)
 add_subdirectory(tests/functional/fire/mortality fates_firemort_ftest)
 add_subdirectory(tests/functional/single_cohort fates_single_cohort_ftest)
 add_subdirectory(tests/functional/leaf_level_photo fates_leaf_level_photo_ftest)
+add_subdirectory(tests/functional/radiation fates_radiation_ftest)
+add_subdirectory(tests/functional/canopy_level_photo fates_canopy_level_photo_ftest)
 
 ## Unit tests
 add_subdirectory(tests/unit/fire_weather_test fates_fire_weather_utest)

@@ -1,12 +1,18 @@
 module FatesTestLightEnvMod
   !
   ! DESCRIPTION:
-  ! Prescribed light environment for standalone, patch-less/site-less cohort test
-  ! drivers. Attenuates a prescribed incident PAR through a lone cohort's own leaf
+  ! Prescribed light environment for standalone, patch-less/site-less test
+  ! drivers. Attenuates a prescribed incident PAR through a canopy's own leaf
   ! layers using FATES's two-stream radiation solver (TwoStreamMLPEMod), with a
   ! single scattering element (one canopy layer, one column, occupying 100% of its
-  ! own footprint) standing in for the cohort - no fates_patch_type/ed_site_type is
-  ! built or required.
+  ! own footprint) standing in for that canopy - no fates_patch_type/ed_site_type
+  ! is built or required.
+  !
+  ! Canopy structure enters as plain treelai/treesai/height scalars (Init/
+  ! Refresh), not a fates_cohort_type, so this serves both a cohort-driven
+  ! caller whose leaf area follows from allometry (test_SingleCohort.F90) and
+  ! one whose LAI is prescribed outright as an experimental treatment
+  ! (test_CanopyLevelPhoto.F90) - see Init's header comment.
   !
   ! Reference full-sun PAR (at cosz=1) and the direct/diffuse split are
   ! assumptions with no existing precedent elsewhere in the repo to draw from;
@@ -26,7 +32,6 @@ module FatesTestLightEnvMod
   use FatesConstantsMod,   only : wm2_to_umolm2s
   use EDParamsMod,         only : GetNVegLayers
   use FatesAllometryMod,   only : VegAreaLayer
-  use FatesCohortMod,      only : fates_cohort_type
   use FatesRadiationMemMod, only : ivis
   use TwoStreamMLPEMod,    only : twostream_type
   use TwoStreamMLPEMod,    only : normalized_upper_boundary
@@ -39,8 +44,12 @@ module FatesTestLightEnvMod
   ! PRESCRIBED LIGHT ENVIRONMENT ASSUMPTIONS
   ! ------------------------------------------------------------------------------------
   real(r8), public, parameter :: ref_par_full_sun = 2000.0_r8/wm2_to_umolm2s ! reference full-sun incident PAR at cosz=1 [W/m2] (~2000 umol/m2/s)
-  real(r8), parameter :: direct_frac       = 0.85_r8  ! fraction of incident PAR that is direct beam (typical clear sky)
-  real(r8), parameter :: diffuse_frac      = 1.0_r8 - direct_frac ! fraction of incident PAR that is diffuse
+  ! public so a driver prescribing its own incident PAR outright (rather than
+  ! going through Profile's light-fraction/solar-cycle path) can reuse this
+  ! same clear-sky split instead of introducing a second, conflicting one -
+  ! see test_CanopyLevelPhoto.F90
+  real(r8), public, parameter :: direct_frac  = 0.85_r8  ! fraction of incident PAR that is direct beam (typical clear sky)
+  real(r8), public, parameter :: diffuse_frac = 1.0_r8 - direct_frac ! fraction of incident PAR that is diffuse
   real(r8), parameter :: max_declin_deg    = 23.45_r8 ! Earth's obliquity, used as the declination amplitude (Cooper 1969) [deg]
   real(r8), parameter :: ground_albedo_par = 0.10_r8  ! soil/litter PAR albedo (diffuse and beam)
   real(r8), parameter :: frac_snow         = 0.0_r8   ! canopy snow-covered fraction (no snow)
@@ -76,21 +85,33 @@ contains
 
   ! ==========================================================================
 
-  subroutine Init(this, cohort, pft)
+  subroutine Init(this, treelai, treesai, height, pft)
     !
     ! DESCRIPTION:
-    ! Allocate the two-stream object for a lone cohort, set up its single
+    ! Allocate the two-stream object for a single canopy, set up its single
     ! scattering element and ground albedo, and allocate the per-leaf-layer arrays.
+    !
+    ! Canopy structure is taken as plain scalars rather than a
+    ! fates_cohort_type: nothing in this module needs anything from a cohort
+    ! beyond treelai/treesai/height, and taking them directly is what lets a
+    ! driver with a PRESCRIBED canopy and no cohort at all
+    ! (test_CanopyLevelPhoto.F90, whose LAI is an experimental treatment
+    ! rather than an allometric consequence of a dbh) reuse this identical
+    ! two-stream attenuation rather than reimplementing it. A cohort-driven
+    ! caller simply passes cohort%treelai/treesai/height (see
+    ! test_SingleCohort.F90).
 
     ! ARGUMENTS:
-    class(light_env_type),   intent(inout) :: this   ! light environment object
-    type(fates_cohort_type), intent(in)    :: cohort ! the cohort this light environment tracks
-    integer,                 intent(in)    :: pft    ! plant functional type index
+    class(light_env_type),   intent(inout) :: this    ! light environment object
+    real(r8),                intent(in)    :: treelai ! in-crown leaf area index [m2 leaf/m2 crown footprint]
+    real(r8),                intent(in)    :: treesai ! in-crown stem area index [m2 stem/m2 crown footprint]
+    real(r8),                intent(in)    :: height  ! plant/canopy height [m]
+    integer,                 intent(in)    :: pft     ! plant functional type index
 
     this%pft     = pft
-    this%treelai = cohort%treelai
-    this%treesai = cohort%treesai
-    this%height  = cohort%height
+    this%treelai = treelai
+    this%treesai = treesai
+    this%height  = height
     this%nv      = GetNVegLayers(this%treelai + this%treesai)
 
     call this%twostr%AllocInitTwoStream((/ivis/), 1, 1)
@@ -112,24 +133,27 @@ contains
 
   ! ==========================================================================
 
-  subroutine Refresh(this, cohort)
+  subroutine Refresh(this, treelai, treesai, height)
     !
     ! DESCRIPTION:
-    ! Re-sync the scattering element's canopy structure from the cohort's current
+    ! Re-sync the scattering element's canopy structure to the caller's current
     ! treelai/treesai/height. The two-stream element was otherwise only ever built
     ! once, at recruitment - this is the fix for crown structure silently going
-    ! stale once PRT allocation starts changing leaf area daily.
+    ! stale once PRT allocation starts changing leaf area daily. Takes scalars
+    ! rather than a cohort, for the same reason Init does (see its header).
 
     ! ARGUMENTS:
-    class(light_env_type),   intent(inout) :: this   ! light environment object
-    type(fates_cohort_type), intent(in)    :: cohort ! the cohort this light environment tracks
+    class(light_env_type),   intent(inout) :: this    ! light environment object
+    real(r8),                intent(in)    :: treelai ! in-crown leaf area index [m2 leaf/m2 crown footprint]
+    real(r8),                intent(in)    :: treesai ! in-crown stem area index [m2 stem/m2 crown footprint]
+    real(r8),                intent(in)    :: height  ! plant/canopy height [m]
 
     ! LOCALS:
     integer :: nv_new ! number of occupied leaf layers, recomputed from current lai/sai
 
-    this%treelai = cohort%treelai
-    this%treesai = cohort%treesai
-    this%height  = cohort%height
+    this%treelai = treelai
+    this%treesai = treesai
+    this%height  = height
 
     this%twostr%scelg(1,1)%lai = this%treelai
     this%twostr%scelg(1,1)%sai = this%treesai

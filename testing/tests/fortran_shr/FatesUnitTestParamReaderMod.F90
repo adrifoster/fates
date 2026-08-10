@@ -8,7 +8,7 @@ module FatesUnitTestParamReaderMod
   use JSONParameterUtilsMod,  	  only : JSONSetLogInit
   use JSONParameterUtilsMod,  	  only : JSONDumpParameter
   use PRTParametersMod,           only : prt_params
-  use FatesInterfaceTypesMod,     only : nleafage
+  use FatesInterfaceTypesMod,     only : nleafage, numpft
   use FatesParameterDerivedMod,   only : param_derived
   use FatesGlobals              , only : fates_log
   use FatesLeafBiophysParamsMod , only : TransferParamsLeafBiophys
@@ -54,6 +54,7 @@ contains
   
     ! initialize derived parameters
     call param_derived%Init(size(prt_params%wood_density, dim=1))
+    numpft = size(prt_params%wood_density, dim=1)
 
   end subroutine ReadParameters
 

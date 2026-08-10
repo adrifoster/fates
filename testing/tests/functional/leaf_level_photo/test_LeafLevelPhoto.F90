@@ -2,22 +2,14 @@ program FatesTestLeafLevelPhoto
   !
   ! DESCRIPTION:
   ! Leaf-level photosynthesis sensitivity sweep: five independent sweeps (PAR,
-  ! CO2, VPD, leaf temperature, and soil water content), each varying ONE
+  ! CO2, VPD, leaf temperature, and soil water content), each varying one
   ! driver variable while holding everything else at a fixed default,
-  ! evaluated for a single PFT (target_pft, 1-based, into the parameter file)
-  ! via FatesTestLeafPhotoMod's EvaluateLeafPhotosynthesis (see that module's
-  ! header comment for the full current production call sequence).
-  !
-  ! DEFAULT REFERENCE CONDITIONS: this test evaluates isolated, static points,
-  ! so "default" here means a deliberately simple, site-independent reference state
-  ! (25 C leaf temperature, 1 kPa leaf-to-air VPD, 380 umol/mol CO2, 210 mmol/mol O2,
-  ! ~full-sun PAR, non-limiting nscaler/btran)
+  ! evaluated for a single PFT 
   !
   ! The Kumarathunge et al. (2019) temperature-acclimation model needs two running-mean
   ! reference temperatures (t_growth, t_home) in addition to the instantaneous leaf
-  ! temperature being swept - both are held fixed at the same default leaf temperature
-  ! for every sweep and every point, which isolates the instantaneous response of an
-  ! already-acclimated leaf from any shift in the acclimation state itself
+  ! temperature being swept. Both are held fixed at the same default leaf temperature
+  ! for every sweep and every point.
   !
   ! The soil water content sweep does NOT vary btran directly. FATES's real
   ! btran (biogeophys/EDBtranMod.F90::btran_ed) is computed from soil matric
@@ -26,15 +18,11 @@ program FatesTestLeafLevelPhoto
   ! multi-layer/root-weighted production sum):
   !     smp_node = max(smpsc, smp)
   !     btran    = min((smp_node - smpsc)/(smpso - smpsc), 1.0)
-  ! where smpsc/smpso are the real PFT parameters (soil matric potential at
-  ! full stomatal closure/opening, read from the parameter file for
-  ! target_pft). This test sweeps a soil water content fraction in [0, 1] and
+  ! where smpsc/smpso are the PFT parameters (soil matric potential at full stomatal 
+  ! closure/opening). This test sweeps a soil water content fraction in [0, 1] and
   ! maps it linearly onto smp between smpsc (fraction=0) and saturation,
-  ! smp=0 (fraction=1): smp(frac) = smpsc*(1-frac). Feeding that into the
-  ! production ramp above reproduces the flat-btran-at-1 / declining-toward-0
-  ! shape most soil-moisture-stress formulations show, using only real FATES
-  ! PFT parameters - no soil texture (which this test has no basis to invent)
-  ! is involved.
+  ! smp=0 (fraction=1): smp(frac) = smpsc*(1-frac). 
+  !
 
   use FatesConstantsMod,           only : r8 => fates_r8
   use FatesConstantsMod,           only : t_water_freeze_k_1atm
@@ -63,9 +51,9 @@ program FatesTestLeafLevelPhoto
   character(len=:), allocatable :: param_file ! input parameter file
   type(environment_type)        :: env        ! prescribed atmospheric boundary conditions
   real(r8), allocatable         :: lnc_top(:)  ! leaf N content at the canopy top, per pft [gN/m2 leaf]
-  real(r8) :: vcmax25top_pft ! reference (25C, canopy-top) maximum carboxylation rate, target_pft's flat PFT default [umol/m2/s]
-  real(r8) :: jmax25top_pft  ! reference (25C, canopy-top) maximum electron transport rate, target_pft's flat PFT default [umol/m2/s]
-  real(r8) :: kp25top_pft    ! reference (25C, canopy-top) initial slope of C4 CO2 response, target_pft's flat PFT default [umol/m2/s]
+  real(r8)                      :: vcmax25top_pft ! maximum carboxylation rate [umol/m2/s]
+  real(r8)                      :: jmax25top_pft  ! maximum electron transport rate [umol/m2/s]
+  real(r8)                      :: kp25top_pft    ! initial slope of C4 CO2 response [umol/m2/s]
 
   ! swept-variable value arrays
   real(r8), allocatable :: par_vals(:)      ! swept PAR values [umol/m2/s]
@@ -92,25 +80,14 @@ program FatesTestLeafLevelPhoto
   integer :: n_par, n_co2, n_vpd, n_temp, n_soilfrac ! sweep array sizes
   integer :: i ! looping index
 
-  ! target_pft's soil matric potential thresholds (mm, negative), read from
-  ! the parameter file below and used only by the soil water content sweep
+  ! target_pft's soil matric potential thresholds
   real(r8) :: smpsc_pft ! soil matric potential at full stomatal closure [mm]
   real(r8) :: smpso_pft ! soil matric potential at full stomatal opening [mm]
 
   ! CONSTANTS:
-  ! PFT 6 is broadleaf_colddecid_extratrop_tree, matching Rogers et al.
-  ! (2017)'s stated "generic temperate broad leaved deciduous tree".
-  ! test_CanopyLevelPhoto.F90 uses this same PFT so the leaf and canopy
-  ! panels describe the same plant and can be shown as a pair - see that
-  ! file's header for why the choice matters much more at canopy scale
   integer, parameter :: target_pft = 6 ! PFT index to evaluate (1-based)
 
-  ! default reference conditions - CO2/O2/dayl_factor/btran come from
-  ! FatesTestEnvironmentMod's shared reference-atmosphere defaults (env%Init,
-  ! below) rather than being duplicated here; this test's own defaults are
-  ! only the ones genuinely specific to it (leaf temperature/VPD, both fixed
-  ! independently of env's site-climatology/RH-driven state, and nscaler,
-  ! which env has no equivalent of)
+  ! default reference conditions
   real(r8), parameter :: default_veg_tempk   = 25.0_r8 + t_water_freeze_k_1atm ! [K]
   real(r8), parameter :: default_vpd         = 1000.0_r8  ! [Pa] leaf-to-air VPD, esat(Tleaf) - eair
   real(r8), parameter :: default_par         = 1500.0_r8  ! [umol/m2/s]

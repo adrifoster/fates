@@ -5,7 +5,9 @@ module FatesTestCohortPhysMod
   ! single cohort, plus the two pieces of leaf physics a standalone, patch-less/
   ! site-less cohort test driver needs each simulated day: a once-per-day setup
   ! (DailySetup) that caches the per-layer nitrogen-scaling factor (nscaler_z -
-  ! depends on cumulative LAI above each layer, which only changes daily), and a
+  ! depends on cumulative LAI above each layer, which only changes daily, and
+  ! is computed by FatesTestLeafPhotoMod's shared LeafLayerNitrogenScaling so a
+  ! prescribed-canopy driver with no cohort can derive it identically), and a
   ! per-substep carbon uptake step (SubdailyStep) that both refreshes the
   ! temperature-dependent capacity/dark-respiration rates from nscaler_z and
   ! this substep's env%tempk (matching production's per-timestep
@@ -13,14 +15,16 @@ module FatesTestCohortPhysMod
   ! diurnal cycle - see FatesTestEnvironmentMod) and consumes them for
   ! photosynthesis.
   !
-  ! Leaf photosynthesis (SubdailyStep) is wired in below: one LeafLayerPhotosynthesis
-  ! call per leaf layer per sunlit/shaded category, then scaled up to a
-  ! per-individual carbon flux (cohort%gpp_tstep) mirroring
-  ! FatesPlantRespPhotosynthMod's ScaleLeafLayerFluxToCohort (which is private to
-  ! that module, so this reimplements its scaling formula rather than reusing it).
-  ! Leaf dark respiration (cohort%rdark) falls out of this as an unavoidable side
-  ! effect, since it is a required input to LeafLayerPhotosynthesis itself. Non-leaf
-  ! (stem/root) maintenance respiration is wired in via NonleafMaintenanceRespiration.
+  ! Leaf photosynthesis (SubdailyStep) is wired in below: one
+  ! FatesTestLeafPhotoMod::EvaluateLeafPhotosynthesis call per leaf layer per
+  ! sunlit/shaded category, then scaled up to a per-individual carbon flux
+  ! (cohort%gpp_tstep) mirroring FatesPlantRespPhotosynthMod's
+  ! ScaleLeafLayerFluxToCohort (which is private to that module, so this
+  ! reimplements its scaling formula rather than reusing it). Leaf dark
+  ! respiration (cohort%rdark) falls out of this as an unavoidable side
+  ! effect, since it is a required input to LeafLayerPhotosynthesis itself.
+  ! Non-leaf (stem/root) maintenance respiration is wired in via
+  ! NonleafMaintenanceRespiration.
   !
 
   use FatesConstantsMod,           only : r8 => fates_r8
@@ -28,7 +32,6 @@ module FatesTestCohortPhysMod
   use FatesConstantsMod,           only : umolC_to_kgC
   use FatesConstantsMod,           only : wm2_to_umolm2s
   use FatesCohortMod,              only : fates_cohort_type
-  use FatesAllometryMod,           only : VegAreaLayer
   use FatesAllometryMod,           only : bleaf
   use FatesAllometryMod,           only : storage_fraction_of_target
   use PRTParametersMod,            only : prt_params
@@ -36,28 +39,28 @@ module FatesTestCohortPhysMod
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesPlantRespPhotosynthMod, only : NonleafMaintenanceRespiration
-  use LeafBiophysicsMod,           only : LeafLayerBiophysicalRates
-  use LeafBiophysicsMod,           only : LeafLayerMaintenanceRespiration_Ryan_1991
   use LeafBiophysicsMod,           only : LeafLayerPhotosynthesis
-  use LeafBiophysicsMod,           only : DecayCoeffVcmax
   use LeafBiophysicsMod,           only : LowstorageMainRespReduction
   use LeafBiophysicsMod,           only : GetCanopyGasParameters
+  use FatesTestLeafPhotoMod,       only : EvaluateLeafPhotosynthesis
+  use FatesTestLeafPhotoMod,       only : leaf_capacity_type
+  use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
+  use FatesTestLeafPhotoMod,       only : LeafLayerNitrogenScaling
+  use FatesTestLeafPhotoMod,       only : LayerParPerLeafArea
+  use FatesTestLeafPhotoMod,       only : SunlitFraction
+  use FatesTestLeafPhotoMod,       only : ci_tol
 
   implicit none
   private
 
-  real(r8), parameter :: ci_tol = 0.5_r8               ! convergence tolerance for intracellular CO2 [Pa], matches FatesPlantRespPhotosynthMod
-  real(r8), parameter :: min_la_to_solve = 1.0e-10_r8  ! minimum leaf area to bother solving photosynthesis for [m2], matches ConvertPar in FatesPlantRespPhotosynthMod
   integer,  parameter :: newton_max_iters = 10          ! matches LeafLayerPhotosynthesis's private max_iters - solve_iter beyond this means the call fell back to CiBisection
 
   type, public :: cohort_phys_type
 
      private
 
-     real(r8), allocatable :: vcmax_z(:), jmax_z(:), kp_z(:) ! per-leaf-layer photosynthetic capacity
-     real(r8), allocatable :: gs0_z(:), gs1_z(:), gs2_z(:)   ! per-leaf-layer stomatal conductance slope/intercept
-     real(r8), allocatable :: lmr_z(:)                        ! per-leaf-layer leaf dark respiration [umolCO2/m2 leaf/s]
-     real(r8), allocatable :: nscaler_z(:)                    ! per-leaf-layer nitrogen-scaling factor [0-1], cached daily by DailySetup, consumed every substep by SubdailyStep
+     type(leaf_capacity_type), allocatable :: cap_z(:) ! per-leaf-layer photosynthetic capacity, stomatal conductance terms and dark respiration
+     real(r8), allocatable :: nscaler_z(:)             ! per-leaf-layer nitrogen-scaling factor [0-1], cached daily by DailySetup, consumed every substep by SubdailyStep
 
      real(r8) :: live_stem_n, live_croot_n   ! aboveground/belowground sapwood N [kgN/plant] - feed NonleafMaintenanceRespiration
      real(r8) :: fnrt_n                      ! fine root N [kgN/plant] - feeds NonleafMaintenanceRespiration
@@ -86,21 +89,13 @@ contains
     class(cohort_phys_type), intent(inout) :: this ! cohort physiology object
     integer,                  intent(in)    :: nv   ! cohort's current number of occupied leaf layers
 
-    if (allocated(this%vcmax_z)) then
-      if (size(this%vcmax_z) /= nv) then
-        deallocate(this%vcmax_z, this%jmax_z, this%kp_z)
-        deallocate(this%gs0_z, this%gs1_z, this%gs2_z, this%lmr_z)
-        deallocate(this%nscaler_z)
-        allocate(this%vcmax_z(nv), this%jmax_z(nv), this%kp_z(nv))
-        allocate(this%gs0_z(nv), this%gs1_z(nv), this%gs2_z(nv))
-        allocate(this%lmr_z(nv))
-        allocate(this%nscaler_z(nv))
+    if (allocated(this%cap_z)) then
+      if (size(this%cap_z) /= nv) then
+        deallocate(this%cap_z, this%nscaler_z)
+        allocate(this%cap_z(nv), this%nscaler_z(nv))
       end if
     else
-      allocate(this%vcmax_z(nv), this%jmax_z(nv), this%kp_z(nv))
-      allocate(this%gs0_z(nv), this%gs1_z(nv), this%gs2_z(nv))
-      allocate(this%lmr_z(nv))
-      allocate(this%nscaler_z(nv))
+      allocate(this%cap_z(nv), this%nscaler_z(nv))
     end if
 
   end subroutine EnsureAllocated
@@ -127,12 +122,6 @@ contains
     ! LOCALS:
     real(r8) :: target_leaf_c  ! reference leaf biomass when fully flushed [kgC] (see EDMortalityFunctionsMod.F90's comment on this same calculation - the target intentionally ignores the plant's current elongation state)
     real(r8) :: sapw_c, fnrt_c ! sapwood/fine root carbon [kgC/plant]
-    integer  :: iv             ! leaf-layer looping index
-    real(r8) :: vai_top, vai_bot       ! vegetation area index bounds of the current leaf layer
-    real(r8) :: elai_layer, esai_layer ! exposed leaf/stem area index of the current leaf layer
-    real(r8) :: cumulative_lai         ! LAI above the middle of the current leaf layer
-    real(r8) :: lai_above              ! running LAI above the current leaf layer
-    real(r8) :: kn                     ! nitrogen vertical-scaling decay coefficient
 
     ! storage-based throttle on maintenance respiration. The elongation factor
     ! is intentionally 1.0 here (fully flushed), not the cohort's current
@@ -162,18 +151,8 @@ contains
 
     call EnsureAllocated(this, cohort%nv)
 
-    lai_above = 0.0_r8
-    do iv = 1, cohort%nv
-      call VegAreaLayer(cohort%treelai, cohort%treesai, cohort%height, iv,     &
-        cohort%nv, pft, 0.0_r8, vai_top, vai_bot, elai_layer, esai_layer)
-      cumulative_lai = lai_above + 0.5_r8*elai_layer
-      lai_above = lai_above + elai_layer
-
-      kn = DecayCoeffVcmax(cohort%vcmax25top,                                  &
-        prt_params%leafn_vert_scaler_coeff1(pft),                             &
-        prt_params%leafn_vert_scaler_coeff2(pft))
-      this%nscaler_z(iv) = exp(-kn*cumulative_lai)
-    end do
+    call LeafLayerNitrogenScaling(cohort%treelai, cohort%treesai,              &
+      cohort%height, cohort%nv, pft, cohort%vcmax25top, this%nscaler_z)
 
   end subroutine DailySetup
 
@@ -209,93 +188,69 @@ contains
     real(r8),                 intent(out)   :: nonleaf_mr_tstep ! this substep's non-leaf (stem/root) maintenance respiration [kgC/indiv/s]
 
     ! LOCALS:
-    real(r8) :: mm_kco2      ! Michaelis-Menten constant for CO2 at this substep's env%tempk [Pa]
-    real(r8) :: mm_ko2       ! Michaelis-Menten constant for O2 at this substep's env%tempk [Pa]
-    real(r8) :: co2_cpoint   ! CO2 compensation point at this substep's env%tempk [Pa]
     integer  :: iv                         ! leaf-layer looping index
     real(r8) :: par_abs                    ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
     real(r8) :: agross_sun, agross_sha     ! gross photosynthesis, sunlit/shaded [umolC/m2 leaf/s]
     real(r8) :: anet_sun, anet_sha         ! net photosynthesis, sunlit/shaded (unused diagnostics)
     real(r8) :: gs_sun, gs_sha             ! stomatal conductance, sunlit/shaded (unused diagnostics)
     real(r8) :: ci_sun, ci_sha             ! intracellular CO2, sunlit/shaded (unused diagnostics)
-    real(r8) :: c13disc_sun, c13disc_sha   ! carbon-13 discrimination, sunlit/shaded (unused diagnostics)
     integer  :: solve_iter                 ! Ci-solver iteration count - >newton_max_iters means it fell back to CiBisection
     real(r8) :: fsun                       ! sunlit fraction of leaf area in the current layer
     real(r8) :: psn_layer                  ! area-weighted mean gross photosynthesis for the layer [umolC/m2 leaf/s]
     real(r8) :: cohort_layer_eleaf_area    ! cohort's effective leaf area in the current layer [m2]
     real(r8) :: gpp_sum, rdark_sum         ! running per-substep GPP/dark-respiration accumulators [umolC/s]
 
-    ! CO2/O2 kinetics are temperature-dependent (Arrhenius-type - see
-    ! GetCanopyGasParameters), so with env%tempk now varying diurnally/annually
-    ! (FatesTestEnvironmentMod) these must be re-evaluated every substep rather
-    ! than once at a fixed reference temperature
-    call GetCanopyGasParameters(env%can_press, env%can_o2_ppress, env%tempk,    &
-      mm_kco2, mm_ko2, co2_cpoint)
-
-    ! prescribed absorbed PAR -> leaf photosynthesis: one LeafLayerPhotosynthesis
-    ! call per leaf layer per sunlit/shaded category (converting parsun_z/parsha_z
-    ! from W/m2 ground to umol photons/m2 leaf/s the same way
-    ! FatesPlantRespPhotosynthMod's ConvertPar does), then combined into an
-    ! area-weighted per-layer rate and scaled up to a per-individual carbon flux -
-    ! reimplements ScaleLeafLayerFluxToCohort's formula, which is private to
-    ! FatesPlantRespPhotosynthMod and so not directly reusable here
+    ! prescribed absorbed PAR -> leaf photosynthesis: one
+    ! EvaluateLeafPhotosynthesis call per leaf layer per sunlit/shaded
+    ! category (converting parsun_z/parsha_z from W/m2 ground to umol
+    ! photons/m2 leaf/s the same way FatesPlantRespPhotosynthMod's ConvertPar
+    ! does; env%tempk/dayl_factor/t_growth/t_home/btran and this layer's
+    ! cached nscaler_z (DailySetup) refresh the temperature-dependent
+    ! capacity/dark-respiration rates every substep, matching production's
+    ! per-timestep LeafLayerBiophysicalRates pattern - see
+    ! EvaluateLeafPhotosynthesis's header comment for the full call sequence
+    ! and why calling it twice per layer here is deliberate), then combined
+    ! into an area-weighted per-layer rate and scaled up to a per-individual
+    ! carbon flux - reimplements ScaleLeafLayerFluxToCohort's formula, which
+    ! is private to FatesPlantRespPhotosynthMod and so not directly reusable
+    ! here
     gpp_sum = 0.0_r8
     rdark_sum = 0.0_r8
     do iv = 1, cohort%nv
 
-      ! refresh this layer's temperature-dependent capacity/dark-respiration
-      ! rates from today's cached nscaler_z (DailySetup) and this substep's
-      ! env%tempk - see this subroutine's header comment
-      call LeafLayerBiophysicalRates(pft, cohort%vcmax25top, cohort%jmax25top, &
-        cohort%kp25top, this%nscaler_z(iv), env%tempk, env%dayl_factor,       &
-        env%t_growth, env%t_home, env%btran, this%vcmax_z(iv),               &
-        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),      &
-        this%gs2_z(iv))
-
-      call LeafLayerMaintenanceRespiration_Ryan_1991(lnc_top,                  &
-        this%nscaler_z(iv), pft, env%tempk, this%lmr_z(iv))
-
-      if (light_env%laisun_z(iv) > min_la_to_solve .and.                       &
-        light_env%parsun_z(iv) > nearzero) then
-        par_abs = light_env%parsun_z(iv)/light_env%laisun_z(iv)*wm2_to_umolm2s
-      else
-        par_abs = 0.0_r8
-      end if
-      call LeafLayerPhotosynthesis(par_abs, pft, this%vcmax_z(iv),             &
-        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),        &
-        this%gs2_z(iv), env%tempk, env%can_press, env%can_co2_ppress,          &
-        env%can_o2_ppress, env%veg_esat, env%gb, env%can_vpress, mm_kco2,      &
-        mm_ko2, co2_cpoint, this%lmr_z(iv), ci_tol, agross_sun, gs_sun,        &
-        anet_sun, c13disc_sun, ci_sun, solve_iter)
+      par_abs = LayerParPerLeafArea(light_env%parsun_z(iv), light_env%laisun_z(iv))
+      ! this layer's capacity (cap_z(iv)) is
+      ! independent of sunlit vs. shaded, so it is only read back here, on
+      ! the sunlit call - see GrossAssimAndResp/LeafNetAssimSweep, which
+      ! reuse it "frozen" from here
+      call EvaluateLeafPhotosynthesis(pft, par_abs, env%tempk, env%t_growth,   &
+        env%t_home, env%can_press, env%can_co2_ppress, env%can_o2_ppress,     &
+        env%veg_esat, env%can_vpress, env%gb, this%nscaler_z(iv),             &
+        env%dayl_factor, env%btran, cohort%vcmax25top, cohort%jmax25top,      &
+        cohort%kp25top, lnc_top, agross_sun, anet_sun, gs_sun, ci_sun,        &
+        vcmax=this%cap_z(iv)%vcmax, jmax=this%cap_z(iv)%jmax,                 &
+        kp=this%cap_z(iv)%kp, gs0=this%cap_z(iv)%gs0,                         &
+        gs1=this%cap_z(iv)%gs1, gs2=this%cap_z(iv)%gs2,                       &
+        lmr=this%cap_z(iv)%lmr, solve_iter_out=solve_iter)
       n_photo_calls = n_photo_calls + 1
       if (solve_iter > newton_max_iters) n_bisection_calls = n_bisection_calls + 1
       max_solve_iter = max(max_solve_iter, solve_iter)
       sum_solve_iter = sum_solve_iter + solve_iter
 
-      if (light_env%laisha_z(iv) > min_la_to_solve .and.                       &
-        light_env%parsha_z(iv) > nearzero) then
-        par_abs = light_env%parsha_z(iv)/light_env%laisha_z(iv)*wm2_to_umolm2s
-      else
-        par_abs = 0.0_r8
-      end if
-      call LeafLayerPhotosynthesis(par_abs, pft, this%vcmax_z(iv),             &
-        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),        &
-        this%gs2_z(iv), env%tempk, env%can_press, env%can_co2_ppress,          &
-        env%can_o2_ppress, env%veg_esat, env%gb, env%can_vpress, mm_kco2,      &
-        mm_ko2, co2_cpoint, this%lmr_z(iv), ci_tol, agross_sha, gs_sha,        &
-        anet_sha, c13disc_sha, ci_sha, solve_iter)
+      par_abs = LayerParPerLeafArea(light_env%parsha_z(iv), light_env%laisha_z(iv))
+      call EvaluateLeafPhotosynthesis(pft, par_abs, env%tempk, env%t_growth,   &
+        env%t_home, env%can_press, env%can_co2_ppress, env%can_o2_ppress,     &
+        env%veg_esat, env%can_vpress, env%gb, this%nscaler_z(iv),             &
+        env%dayl_factor, env%btran, cohort%vcmax25top, cohort%jmax25top,      &
+        cohort%kp25top, lnc_top, agross_sha, anet_sha, gs_sha, ci_sha,        &
+        solve_iter_out=solve_iter)
       n_photo_calls = n_photo_calls + 1
       if (solve_iter > newton_max_iters) n_bisection_calls = n_bisection_calls + 1
       max_solve_iter = max(max_solve_iter, solve_iter)
       sum_solve_iter = sum_solve_iter + solve_iter
 
       ! area-weighted mean gross photosynthesis for the layer, sunlit + shaded
-      if (light_env%laisun_z(iv) + light_env%laisha_z(iv) > nearzero) then
-        fsun = light_env%laisun_z(iv) /                                        &
-          (light_env%laisun_z(iv) + light_env%laisha_z(iv))
-      else
-        fsun = 0.0_r8
-      end if
+      fsun = SunlitFraction(light_env%laisun_z(iv), light_env%laisha_z(iv))
       psn_layer = fsun*agross_sun + (1.0_r8 - fsun)*agross_sha
 
       ! [umolC/m2 leaf/s] * [m2 leaf] -> [umolC/s], leaf area per this cohort
@@ -303,7 +258,7 @@ contains
       cohort_layer_eleaf_area = (light_env%laisun_z(iv) +                      &
         light_env%laisha_z(iv)) * cohort%c_area
       gpp_sum   = gpp_sum   + psn_layer * cohort_layer_eleaf_area
-      rdark_sum = rdark_sum + this%lmr_z(iv) * cohort_layer_eleaf_area
+      rdark_sum = rdark_sum + this%cap_z(iv)%lmr * cohort_layer_eleaf_area
 
     end do
 
@@ -338,12 +293,12 @@ contains
     ! (parsun_z/parsha_z/laisun_z/laisha_z - typically from
     ! FatesTestLightEnvMod's AttenuateCanopy at a diagnostic incident PPFD, not
     ! this substep's real light_env%parsun_z etc.), using this cohort's current
-    ! ("frozen") per-layer capacity (vcmax_z/jmax_z/kp_z/gs0_z/gs1_z/gs2_z/lmr_z)
+    ! ("frozen") per-layer capacity (cap_z)
     ! exactly as SubdailyStep left them - NOT recomputed here, since a diagnostic
     ! sweep across incident PPFD is not supposed to advance any state. Unlike
     ! SubdailyStep, nothing here is written to cohort (gpp_tstep/rdark/
     ! livestem_mr/livecroot_mr/froot_mr/sym_nfix_tstep all stay untouched) or to
-    ! this (vcmax_z etc.), so there is nothing to restore afterward - this is a
+    ! this (cap_z), so there is nothing to restore afterward - this is a
     ! pure read of already-existing state, safe to call repeatedly without
     ! perturbing the driver's actual daily/sub-daily trajectory.
 
@@ -364,15 +319,9 @@ contains
     ! LOCALS:
     real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point at env%tempk [Pa]
     integer  :: iv                         ! leaf-layer looping index
-    real(r8) :: par_abs                    ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
-    real(r8) :: agross_sun, agross_sha     ! gross photosynthesis, sunlit/shaded [umolC/m2 leaf/s]
-    real(r8) :: anet_sun, anet_sha         ! net photosynthesis, sunlit/shaded (unused diagnostics)
-    real(r8) :: gs_sun, gs_sha             ! stomatal conductance, sunlit/shaded (unused diagnostics)
-    real(r8) :: ci_sun, ci_sha             ! intracellular CO2, sunlit/shaded (unused diagnostics)
-    real(r8) :: c13disc_sun, c13disc_sha   ! carbon-13 discrimination, sunlit/shaded (unused diagnostics)
-    integer  :: solve_iter                 ! Ci-solver iteration count (unused diagnostic here - see SubdailyStep for the tracked version)
-    real(r8) :: fsun                       ! sunlit fraction of leaf area in the current layer
     real(r8) :: psn_layer                  ! area-weighted mean gross photosynthesis for the layer [umolC/m2 leaf/s]
+    real(r8) :: anet_layer                 ! area-weighted mean net photosynthesis for the layer [umolC/m2 leaf/s] - unused here, since this diagnostic integrates GROSS assimilation and accounts for respiration separately below
+    real(r8) :: lai_layer                  ! this layer's total leaf area index [m2 leaf/m2 ground]
     real(r8) :: cohort_layer_eleaf_area    ! cohort's effective leaf area in the current layer [m2]
     real(r8) :: gross_assim_sum, leaf_resp_sum ! running whole-plant accumulators [umolC/s]
     real(r8) :: livestem_mr, livecroot_mr, froot_mr, sym_nfix_tstep ! NonleafMaintenanceRespiration outputs (local - not cohort%livestem_mr etc.)
@@ -384,40 +333,14 @@ contains
     leaf_resp_sum = 0.0_r8
     do iv = 1, cohort%nv
 
-      if (laisun_z(iv) > min_la_to_solve .and. parsun_z(iv) > nearzero) then
-        par_abs = parsun_z(iv)/laisun_z(iv)*wm2_to_umolm2s
-      else
-        par_abs = 0.0_r8
-      end if
-      call LeafLayerPhotosynthesis(par_abs, pft, this%vcmax_z(iv),              &
-        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),        &
-        this%gs2_z(iv), env%tempk, env%can_press, env%can_co2_ppress,          &
-        env%can_o2_ppress, env%veg_esat, env%gb, env%can_vpress, mm_kco2,      &
-        mm_ko2, co2_cpoint, this%lmr_z(iv), ci_tol, agross_sun, gs_sun,        &
-        anet_sun, c13disc_sun, ci_sun, solve_iter)
+      call LeafLayerSunShade(pft, this%cap_z(iv), parsun_z(iv), parsha_z(iv),   &
+        laisun_z(iv), laisha_z(iv), env%tempk, env%can_press,                  &
+        env%can_co2_ppress, env%can_o2_ppress, env%veg_esat, env%can_vpress,   &
+        env%gb, mm_kco2, mm_ko2, co2_cpoint, psn_layer, anet_layer, lai_layer)
 
-      if (laisha_z(iv) > min_la_to_solve .and. parsha_z(iv) > nearzero) then
-        par_abs = parsha_z(iv)/laisha_z(iv)*wm2_to_umolm2s
-      else
-        par_abs = 0.0_r8
-      end if
-      call LeafLayerPhotosynthesis(par_abs, pft, this%vcmax_z(iv),              &
-        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),        &
-        this%gs2_z(iv), env%tempk, env%can_press, env%can_co2_ppress,          &
-        env%can_o2_ppress, env%veg_esat, env%gb, env%can_vpress, mm_kco2,      &
-        mm_ko2, co2_cpoint, this%lmr_z(iv), ci_tol, agross_sha, gs_sha,        &
-        anet_sha, c13disc_sha, ci_sha, solve_iter)
-
-      if (laisun_z(iv) + laisha_z(iv) > nearzero) then
-        fsun = laisun_z(iv) / (laisun_z(iv) + laisha_z(iv))
-      else
-        fsun = 0.0_r8
-      end if
-      psn_layer = fsun*agross_sun + (1.0_r8 - fsun)*agross_sha
-
-      cohort_layer_eleaf_area = (laisun_z(iv) + laisha_z(iv)) * cohort%c_area
+      cohort_layer_eleaf_area = lai_layer * cohort%c_area
       gross_assim_sum = gross_assim_sum + psn_layer * cohort_layer_eleaf_area
-      leaf_resp_sum   = leaf_resp_sum   + this%lmr_z(iv) * cohort_layer_eleaf_area
+      leaf_resp_sum   = leaf_resp_sum   + this%cap_z(iv)%lmr * cohort_layer_eleaf_area
 
     end do
 
@@ -440,8 +363,8 @@ contains
     !
     ! DESCRIPTION:
     ! Leaf-level light-response sweep at a single, fixed canopy position (iv),
-    ! evaluated at that layer's already-"frozen" capacity (vcmax_z/jmax_z/kp_z/
-    ! gs0_z/gs1_z/gs2_z/lmr_z, exactly as SubdailyStep left them). Unlike
+    ! evaluated at that layer's already-"frozen" capacity (cap_z(iv), exactly
+    ! as SubdailyStep left it). Unlike
     ! GrossAssimAndResp (whole-plant assimilation integrated over a caller-
     ! supplied, already-self-shaded canopy PAR profile), this sweeps a caller-
     ! supplied incident PPFD directly onto one leaf layer's photosynthesis, with
@@ -481,12 +404,13 @@ contains
       mm_kco2, mm_ko2, co2_cpoint)
 
     do ippfd = 1, size(ppfd_values)
-      call LeafLayerPhotosynthesis(ppfd_values(ippfd), pft, this%vcmax_z(iv),   &
-        this%jmax_z(iv), this%kp_z(iv), this%gs0_z(iv), this%gs1_z(iv),        &
-        this%gs2_z(iv), env%tempk, env%can_press, env%can_co2_ppress,          &
-        env%can_o2_ppress, env%veg_esat, env%gb, env%can_vpress, mm_kco2,      &
-        mm_ko2, co2_cpoint, this%lmr_z(iv), ci_tol, agross, gs, anet(ippfd),   &
-        c13disc, ci, solve_iter)
+      call LeafLayerPhotosynthesis(ppfd_values(ippfd), pft,                     &
+        this%cap_z(iv)%vcmax, this%cap_z(iv)%jmax, this%cap_z(iv)%kp,          &
+        this%cap_z(iv)%gs0, this%cap_z(iv)%gs1, this%cap_z(iv)%gs2,            &
+        env%tempk, env%can_press, env%can_co2_ppress, env%can_o2_ppress,       &
+        env%veg_esat, env%gb, env%can_vpress, mm_kco2, mm_ko2, co2_cpoint,     &
+        this%cap_z(iv)%lmr, ci_tol, agross, gs, anet(ippfd), c13disc, ci,      &
+        solve_iter)
     end do
 
   end subroutine LeafNetAssimSweep
