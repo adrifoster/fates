@@ -16,8 +16,9 @@ module FatesTestCohortPhysMod
   ! photosynthesis.
   !
   ! Leaf photosynthesis (SubdailyStep) is wired in below: one
-  ! FatesTestLeafPhotoMod::EvaluateLeafPhotosynthesis call per leaf layer per
-  ! sunlit/shaded category, then scaled up to a per-individual carbon flux
+  ! FatesTestLeafPhotoMod::LeafLayerCapacity + LeafLayerSunShade pair per leaf
+  ! layer (the latter evaluating both the sunlit and shaded categories at that
+  ! capacity and area-weighting them), then scaled up to a per-individual carbon flux
   ! (cohort%gpp_tstep) mirroring FatesPlantRespPhotosynthMod's
   ! ScaleLeafLayerFluxToCohort (which is private to that module, so this
   ! reimplements its scaling formula rather than reusing it). Leaf dark
@@ -42,12 +43,10 @@ module FatesTestCohortPhysMod
   use LeafBiophysicsMod,           only : LeafLayerPhotosynthesis
   use LeafBiophysicsMod,           only : LowstorageMainRespReduction
   use LeafBiophysicsMod,           only : GetCanopyGasParameters
-  use FatesTestLeafPhotoMod,       only : EvaluateLeafPhotosynthesis
   use FatesTestLeafPhotoMod,       only : leaf_capacity_type
+  use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
   use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
   use FatesTestLeafPhotoMod,       only : LeafLayerNitrogenScaling
-  use FatesTestLeafPhotoMod,       only : LayerParPerLeafArea
-  use FatesTestLeafPhotoMod,       only : SunlitFraction
   use FatesTestLeafPhotoMod,       only : ci_tol
 
   implicit none
@@ -189,74 +188,62 @@ contains
 
     ! LOCALS:
     integer  :: iv                         ! leaf-layer looping index
-    real(r8) :: par_abs                    ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
-    real(r8) :: agross_sun, agross_sha     ! gross photosynthesis, sunlit/shaded [umolC/m2 leaf/s]
-    real(r8) :: anet_sun, anet_sha         ! net photosynthesis, sunlit/shaded (unused diagnostics)
-    real(r8) :: gs_sun, gs_sha             ! stomatal conductance, sunlit/shaded (unused diagnostics)
-    real(r8) :: ci_sun, ci_sha             ! intracellular CO2, sunlit/shaded (unused diagnostics)
-    integer  :: solve_iter                 ! Ci-solver iteration count - >newton_max_iters means it fell back to CiBisection
-    real(r8) :: fsun                       ! sunlit fraction of leaf area in the current layer
+    real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point at env%tempk [Pa]
+    integer  :: solve_iter_sun             ! Ci-solver iteration count, sunlit call - >newton_max_iters means it fell back to CiBisection
+    integer  :: solve_iter_sha             ! Ci-solver iteration count, shaded call - >newton_max_iters means it fell back to CiBisection
     real(r8) :: psn_layer                  ! area-weighted mean gross photosynthesis for the layer [umolC/m2 leaf/s]
+    real(r8) :: anet_layer                 ! area-weighted mean net photosynthesis for the layer [umolC/m2 leaf/s] - unused here, since a whole-plant carbon balance integrates GROSS assimilation and accounts for respiration separately
+    real(r8) :: lai_layer                  ! this layer's total leaf area index [m2 leaf/m2 ground]
     real(r8) :: cohort_layer_eleaf_area    ! cohort's effective leaf area in the current layer [m2]
     real(r8) :: gpp_sum, rdark_sum         ! running per-substep GPP/dark-respiration accumulators [umolC/s]
 
-    ! prescribed absorbed PAR -> leaf photosynthesis: one
-    ! EvaluateLeafPhotosynthesis call per leaf layer per sunlit/shaded
-    ! category (converting parsun_z/parsha_z from W/m2 ground to umol
-    ! photons/m2 leaf/s the same way FatesPlantRespPhotosynthMod's ConvertPar
-    ! does; env%tempk/dayl_factor/t_growth/t_home/btran and this layer's
-    ! cached nscaler_z (DailySetup) refresh the temperature-dependent
-    ! capacity/dark-respiration rates every substep, matching production's
-    ! per-timestep LeafLayerBiophysicalRates pattern - see
-    ! EvaluateLeafPhotosynthesis's header comment for the full call sequence
-    ! and why calling it twice per layer here is deliberate), then combined
-    ! into an area-weighted per-layer rate and scaled up to a per-individual
-    ! carbon flux - reimplements ScaleLeafLayerFluxToCohort's formula, which
-    ! is private to FatesPlantRespPhotosynthMod and so not directly reusable
-    ! here
+    ! prescribed absorbed PAR -> leaf photosynthesis, one leaf layer at a time:
+    ! this layer's temperature-dependent capacity/dark-respiration rates are
+    ! refreshed (LeafLayerCapacity) from env%tempk/dayl_factor/t_growth/t_home/
+    ! btran and today's cached nscaler_z (DailySetup), matching production's
+    ! per-timestep LeafLayerBiophysicalRates pattern, then the layer's sunlit
+    ! and shaded halves are evaluated at that capacity and area-weighted into a
+    ! single per-layer rate (LeafLayerSunShade, which also converts
+    ! parsun_z/parsha_z from W/m2 ground to umol photons/m2 leaf/s the same way
+    ! FatesPlantRespPhotosynthMod's ConvertPar does). That per-layer rate is
+    ! scaled up to a per-individual carbon flux below - reimplements
+    ! ScaleLeafLayerFluxToCohort's formula, which is private to
+    ! FatesPlantRespPhotosynthMod and so not directly reusable here.
+    !
+    ! The Michaelis-Menten constants/CO2 compensation point depend only on
+    ! can_press/can_o2_ppress/env%tempk, none of which vary down the canopy
+    ! within one substep, so GetCanopyGasParameters is hoisted out of the layer
+    ! loop rather than recomputed per photosynthesis call
+    call GetCanopyGasParameters(env%can_press, env%can_o2_ppress, env%tempk,   &
+      mm_kco2, mm_ko2, co2_cpoint)
+
     gpp_sum = 0.0_r8
     rdark_sum = 0.0_r8
     do iv = 1, cohort%nv
 
-      par_abs = LayerParPerLeafArea(light_env%parsun_z(iv), light_env%laisun_z(iv))
-      ! this layer's capacity (cap_z(iv)) is
-      ! independent of sunlit vs. shaded, so it is only read back here, on
-      ! the sunlit call - see GrossAssimAndResp/LeafNetAssimSweep, which
-      ! reuse it "frozen" from here
-      call EvaluateLeafPhotosynthesis(pft, par_abs, env%tempk, env%t_growth,   &
-        env%t_home, env%can_press, env%can_co2_ppress, env%can_o2_ppress,     &
-        env%veg_esat, env%can_vpress, env%gb, this%nscaler_z(iv),             &
-        env%dayl_factor, env%btran, cohort%vcmax25top, cohort%jmax25top,      &
-        cohort%kp25top, lnc_top, agross_sun, anet_sun, gs_sun, ci_sun,        &
-        vcmax=this%cap_z(iv)%vcmax, jmax=this%cap_z(iv)%jmax,                 &
-        kp=this%cap_z(iv)%kp, gs0=this%cap_z(iv)%gs0,                         &
-        gs1=this%cap_z(iv)%gs1, gs2=this%cap_z(iv)%gs2,                       &
-        lmr=this%cap_z(iv)%lmr, solve_iter_out=solve_iter)
-      n_photo_calls = n_photo_calls + 1
-      if (solve_iter > newton_max_iters) n_bisection_calls = n_bisection_calls + 1
-      max_solve_iter = max(max_solve_iter, solve_iter)
-      sum_solve_iter = sum_solve_iter + solve_iter
+      ! capacity is independent of sunlit vs. shaded, so it is computed once
+      ! per layer and cached into cap_z(iv) - see GrossAssimAndResp/
+      ! LeafNetAssimSweep, which reuse it "frozen" from here
+      call LeafLayerCapacity(pft, env%tempk, env%t_growth, env%t_home,         &
+        this%nscaler_z(iv), env%dayl_factor, env%btran, cohort%vcmax25top,     &
+        cohort%jmax25top, cohort%kp25top, lnc_top, this%cap_z(iv))
 
-      par_abs = LayerParPerLeafArea(light_env%parsha_z(iv), light_env%laisha_z(iv))
-      call EvaluateLeafPhotosynthesis(pft, par_abs, env%tempk, env%t_growth,   &
-        env%t_home, env%can_press, env%can_co2_ppress, env%can_o2_ppress,     &
-        env%veg_esat, env%can_vpress, env%gb, this%nscaler_z(iv),             &
-        env%dayl_factor, env%btran, cohort%vcmax25top, cohort%jmax25top,      &
-        cohort%kp25top, lnc_top, agross_sha, anet_sha, gs_sha, ci_sha,        &
-        solve_iter_out=solve_iter)
-      n_photo_calls = n_photo_calls + 1
-      if (solve_iter > newton_max_iters) n_bisection_calls = n_bisection_calls + 1
-      max_solve_iter = max(max_solve_iter, solve_iter)
-      sum_solve_iter = sum_solve_iter + solve_iter
+      call LeafLayerSunShade(pft, this%cap_z(iv), light_env%parsun_z(iv),      &
+        light_env%parsha_z(iv), light_env%laisun_z(iv),                        &
+        light_env%laisha_z(iv), env%tempk, env%can_press,                      &
+        env%can_co2_ppress, env%can_o2_ppress, env%veg_esat, env%can_vpress,   &
+        env%gb, mm_kco2, mm_ko2, co2_cpoint, psn_layer, anet_layer,            &
+        lai_layer, solve_iter_sun, solve_iter_sha)
 
-      ! area-weighted mean gross photosynthesis for the layer, sunlit + shaded
-      fsun = SunlitFraction(light_env%laisun_z(iv), light_env%laisha_z(iv))
-      psn_layer = fsun*agross_sun + (1.0_r8 - fsun)*agross_sha
+      n_photo_calls = n_photo_calls + 2
+      if (solve_iter_sun > newton_max_iters) n_bisection_calls = n_bisection_calls + 1
+      if (solve_iter_sha > newton_max_iters) n_bisection_calls = n_bisection_calls + 1
+      max_solve_iter = max(max_solve_iter, solve_iter_sun, solve_iter_sha)
+      sum_solve_iter = sum_solve_iter + solve_iter_sun + solve_iter_sha
 
       ! [umolC/m2 leaf/s] * [m2 leaf] -> [umolC/s], leaf area per this cohort
       ! in this layer = layer's exposed LAI * the cohort's own crown area
-      cohort_layer_eleaf_area = (light_env%laisun_z(iv) +                      &
-        light_env%laisha_z(iv)) * cohort%c_area
+      cohort_layer_eleaf_area = lai_layer * cohort%c_area
       gpp_sum   = gpp_sum   + psn_layer * cohort_layer_eleaf_area
       rdark_sum = rdark_sum + this%cap_z(iv)%lmr * cohort_layer_eleaf_area
 

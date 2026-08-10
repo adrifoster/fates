@@ -25,26 +25,29 @@ program FatesCanopyLevelPhoto
   ! None of Rogers' five sweeps are run yet - that is the next step, and the
   ! per-layer machinery exercised here is exactly what they will drive.
   !
-  ! CANOPY INTEGRATION: per leaf layer, absorbed PAR is converted from a per-
-  ! ground-area flux to the per-leaf-area PPFD leaf photosynthesis expects
-  ! (LayerParPerLeafArea), and EvaluateLeafPhotosynthesis is called twice -
-  ! once sunlit, once shaded - at that layer's nitrogen-scaled capacity
-  ! (LeafLayerNitrogenScaling). The two are combined by sunlit fraction
-  ! (SunlitFraction) into one per-layer rate [umolC/m2 leaf/s], multiplied by
-  ! that layer's leaf area index [m2 leaf/m2 ground] and summed down the
-  ! canopy, giving canopy net photosynthesis per unit GROUND area
-  ! [umolC/m2 ground/s] - the y-axis of Rogers' canopy panels, as distinct
-  ! from the per-leaf-area y-axis of the leaf panels test_LeafLevelPhoto.F90
-  ! reproduces.
+  ! CANOPY INTEGRATION: per leaf layer, that layer's nitrogen-scaled capacity
+  ! (LeafLayerNitrogenScaling -> LeafLayerCapacity) is evaluated sunlit and
+  ! shaded and area-weighted into one per-layer rate [umolC/m2 leaf/s] by
+  ! FatesTestLeafPhotoMod's LeafLayerSunShade - the same shared routine
+  ! test_SingleCohort.F90 drives, differing only in what each does with the
+  ! result. Here that rate is multiplied by the layer's leaf area index
+  ! [m2 leaf/m2 ground] and summed down the canopy, giving canopy net
+  ! photosynthesis per unit GROUND area [umolC/m2 ground/s] - the y-axis of
+  ! Rogers' canopy panels, as distinct from the per-leaf-area y-axis of the
+  ! leaf panels test_LeafLevelPhoto.F90 reproduces.
   !
   ! Rogers' canopy A is NET leaf-level assimilation integrated over the
   ! canopy: leaf dark respiration is included (it is internal to anet), while
   ! non-leaf (stem/coarse root/fine root) maintenance respiration is NOT -
   ! this is a canopy flux, not a whole-plant carbon balance. That is why
-  ! FatesTestCohortPhysMod's GrossAssimAndResp is deliberately not reused
-  ! here: it returns gross assimilation and whole-plant respiration scaled
-  ! per individual, at frozen daily capacity, none of which matches this
-  ! protocol (which must recompute capacity per swept point).
+  ! FatesTestCohortPhysMod's GrossAssimAndResp is not called here: it returns
+  ! gross assimilation and whole-plant respiration scaled per individual, at
+  ! frozen daily capacity, none of which matches this protocol (which must
+  ! recompute capacity per swept point). The per-layer sunlit/shaded physics
+  ! underneath is nonetheless shared with it - both go through
+  ! LeafLayerSunShade, which returns gross and net side by side precisely so
+  ! that this difference stays a choice of which output to integrate rather
+  ! than a reason to keep two copies of the loop.
   !
   ! PFT: target_pft below is 6, broadleaf_colddecid_extratrop_tree, matching
   ! Rogers' stated "generic temperate broad leaved deciduous tree".
@@ -125,14 +128,15 @@ program FatesCanopyLevelPhoto
   use LeafBiophysicsMod,           only : FvCB1980, medlyn_model, net_assim_model
   use LeafBiophysicsMod,           only : photosynth_acclim_model_kumarathunge_etal_2019
   use LeafBiophysicsMod,           only : QSat
+  use LeafBiophysicsMod,           only : GetCanopyGasParameters
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesTestLightEnvMod,        only : direct_frac, diffuse_frac
-  use FatesTestLeafPhotoMod,       only : EvaluateLeafPhotosynthesis
+  use FatesTestLeafPhotoMod,       only : leaf_capacity_type
+  use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
+  use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
   use FatesTestLeafPhotoMod,       only : LeafNitrogenContent
   use FatesTestLeafPhotoMod,       only : LeafLayerNitrogenScaling
-  use FatesTestLeafPhotoMod,       only : LayerParPerLeafArea
-  use FatesTestLeafPhotoMod,       only : SunlitFraction
   use FatesUnitTestIOMod,          only : OpenNCFile, RegisterNCDims, CloseNCFile
   use FatesUnitTestIOMod,          only : WriteVar, RegisterVar, EndNCDef
   use FatesUnitTestIOMod,          only : RegisterFillValue
@@ -172,17 +176,13 @@ program FatesCanopyLevelPhoto
   real(r8) :: default_can_vpress ! canopy air vapor pressure at the default VPD [Pa]
   real(r8) :: qs_dummy           ! saturation specific humidity output from QSat (unused here)
 
-  ! per-layer photosynthesis results
-  real(r8) :: par_abs                  ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
-  real(r8) :: agross_sun, agross_sha   ! gross photosynthesis, sunlit/shaded [umolC/m2 leaf/s] (unused diagnostics)
-  real(r8) :: anet_sun, anet_sha       ! net photosynthesis, sunlit/shaded [umolC/m2 leaf/s]
-  real(r8) :: gs_sun, gs_sha           ! stomatal conductance, sunlit/shaded (unused diagnostics)
-  real(r8) :: ci_sun, ci_sha           ! intracellular CO2, sunlit/shaded (unused diagnostics)
-  real(r8) :: fsun                     ! sunlit fraction of this layer's leaf area [0-1]
-  real(r8) :: anet_layer               ! area-weighted net photosynthesis for this layer [umolC/m2 leaf/s]
+  ! the per-layer photosynthesis working variables are locals of CanopyNetAssim
+  ! rather than program-scope names it reaches by host association - a contained
+  ! subroutine silently sharing the program's scratch space (its loop index in
+  ! particular) is a hazard the moment a second loop exists
 
   integer :: ilai ! prescribed-LAI looping index
-  integer :: iv   ! leaf-layer looping index
+  integer :: iv   ! leaf-layer looping index (this program's own layer_index loop; CanopyNetAssim declares its own)
 
   ! CONSTANTS:
   character(len=*), parameter :: out_file = 'canopy_level_photo_out.nc' ! output file
@@ -360,6 +360,12 @@ contains
 
     ! LOCALS:
     logical :: do_store ! resolved store_profile
+    integer :: iv       ! leaf-layer looping index
+    type(leaf_capacity_type) :: cap ! this layer's capacity/dark respiration at the swept conditions
+    real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point at veg_tempk [Pa]
+    real(r8) :: agross_layer ! area-weighted gross photosynthesis for this layer [umolC/m2 leaf/s] - unused here; Rogers' canopy panels integrate NET assimilation (see the program header)
+    real(r8) :: anet_layer   ! area-weighted net photosynthesis for this layer [umolC/m2 leaf/s]
+    real(r8) :: lai_layer    ! this layer's total leaf area index [m2 leaf/m2 ground]
 
     do_store = .false.
     if (present(store_profile)) do_store = store_profile
@@ -374,32 +380,33 @@ contains
       light_env%parsun_z, light_env%parsha_z, light_env%laisun_z,              &
       light_env%laisha_z)
 
+    ! the Michaelis-Menten constants/CO2 compensation point depend only on
+    ! can_press/can_o2_ppress/veg_tempk, none of which vary down the canopy at a
+    ! single swept point, so GetCanopyGasParameters is hoisted out of the layer
+    ! loop rather than recomputed per photosynthesis call
+    call GetCanopyGasParameters(env%can_press, env%can_o2_ppress, veg_tempk,   &
+      mm_kco2, mm_ko2, co2_cpoint)
+
     canopy_anet_out = 0.0_r8
     do iv = 1, nv
 
-      ! sunlit leaves in this layer
-      par_abs = LayerParPerLeafArea(light_env%parsun_z(iv), light_env%laisun_z(iv))
-      call EvaluateLeafPhotosynthesis(target_pft, par_abs, veg_tempk,          &
-        veg_tempk, veg_tempk, env%can_press, can_co2_ppress,                   &
-        env%can_o2_ppress, veg_esat, can_vpress, env%gb, nscaler_z(iv),        &
-        env%dayl_factor, btran, vcmax25top, jmax25top_pft, kp25top_pft,        &
-        lnc_top, agross_sun, anet_sun, gs_sun, ci_sun)
+      ! this layer's capacity at the swept conditions - recomputed per point
+      ! rather than held, since every one of Rogers' sweeps moves something it
+      ! depends on (leaf temperature, btran, or vcmax25top itself)
+      call LeafLayerCapacity(target_pft, veg_tempk, veg_tempk, veg_tempk,      &
+        nscaler_z(iv), env%dayl_factor, btran, vcmax25top, jmax25top_pft,      &
+        kp25top_pft, lnc_top, cap)
 
-      ! shaded leaves in this layer
-      par_abs = LayerParPerLeafArea(light_env%parsha_z(iv), light_env%laisha_z(iv))
-      call EvaluateLeafPhotosynthesis(target_pft, par_abs, veg_tempk,          &
-        veg_tempk, veg_tempk, env%can_press, can_co2_ppress,                   &
-        env%can_o2_ppress, veg_esat, can_vpress, env%gb, nscaler_z(iv),        &
-        env%dayl_factor, btran, vcmax25top, jmax25top_pft, kp25top_pft,        &
-        lnc_top, agross_sha, anet_sha, gs_sha, ci_sha)
+      ! sunlit and shaded leaves in this layer, area-weighted into one rate
+      call LeafLayerSunShade(target_pft, cap, light_env%parsun_z(iv),          &
+        light_env%parsha_z(iv), light_env%laisun_z(iv),                        &
+        light_env%laisha_z(iv), veg_tempk, env%can_press, can_co2_ppress,      &
+        env%can_o2_ppress, veg_esat, can_vpress, env%gb, mm_kco2, mm_ko2,      &
+        co2_cpoint, agross_layer, anet_layer, lai_layer)
 
-      ! area-weighted mean net photosynthesis for the layer, then scaled by
-      ! this layer's leaf area index: [umolC/m2 leaf/s] * [m2 leaf/m2 ground]
-      ! -> [umolC/m2 ground/s], accumulated down the canopy
-      fsun = SunlitFraction(light_env%laisun_z(iv), light_env%laisha_z(iv))
-      anet_layer = fsun*anet_sun + (1.0_r8 - fsun)*anet_sha
-      canopy_anet_out = canopy_anet_out + anet_layer *                         &
-        (light_env%laisun_z(iv) + light_env%laisha_z(iv))
+      ! scaled by this layer's leaf area index: [umolC/m2 leaf/s] *
+      ! [m2 leaf/m2 ground] -> [umolC/m2 ground/s], accumulated down the canopy
+      canopy_anet_out = canopy_anet_out + anet_layer * lai_layer
 
       if (do_store) then
         parsun_z_out(iv, ilai_store)  = light_env%parsun_z(iv)
