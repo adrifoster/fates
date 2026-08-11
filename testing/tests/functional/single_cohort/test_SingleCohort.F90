@@ -135,12 +135,19 @@ program FatesSingleCohort
   !
   ! The optional fourth argument is a path to a &fates_test_site namelist file
   ! (see FatesTestSiteMod.F90's module header) that overrides some or all of
-  ! the driver's default BCI, Panama site descriptors (latitude, the annual/
-  ! diurnal temperature cycle, and relative humidity) - lets a "different
-  ! site" experiment be run without rebuilding. As with the third argument,
-  ! reaching this one requires the second and third to also be supplied
-  ! (positional arguments). Any variable the namelist file omits keeps its
-  ! BCI default.
+  ! the driver's default BCI, Panama site descriptors (latitude, the annual and
+  ! diurnal temperature cycle, and the humidity boundary condition) - lets a
+  ! "different site" experiment be run without rebuilding. As with the third
+  ! argument, reaching this one requires the second and third to also be
+  ! supplied (positional arguments). Any variable the namelist file omits keeps
+  ! its BCI default.
+  !
+  ! Note that humidity is prescribed as a fixed leaf-to-air VPD by default, so
+  ! that light is the only driver varying through a run and this stays a light
+  ! experiment. Setting humidity_mode = humidity_climatology in that namelist
+  ! switches to the fitted BCI vapor pressure cycle, which is more realistic but
+  ! makes VPD co-vary with PAR - see FatesTestEnvironmentMod.F90's header before
+  ! interpreting results from it.
   !
 
   use FatesConstantsMod,           only : r8 => fates_r8
@@ -626,7 +633,8 @@ contains
           daily_rdark, daily_livestem_mr, daily_livecroot_mr, daily_froot_mr,      &
           growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,                &
           struct_turnover, npp_acc_to_prt, frac_store, cmort,                      &
-          light_intercept_eff, maintresp_reduction_factor, daily_absorbed_par_indiv)
+          light_intercept_eff, maintresp_reduction_factor,                        &
+          daily_absorbed_par_indiv, env)
 
       end do
 

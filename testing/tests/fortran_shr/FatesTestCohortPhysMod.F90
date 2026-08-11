@@ -36,7 +36,7 @@ module FatesTestCohortPhysMod
   use FatesAllometryMod,           only : bleaf
   use FatesAllometryMod,           only : storage_fraction_of_target
   use PRTParametersMod,            only : prt_params
-  use PRTGenericMod,                only : store_organ, sapw_organ, fnrt_organ, carbon12_element
+  use PRTGenericMod,               only : store_organ, sapw_organ, fnrt_organ, carbon12_element
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesPlantRespPhotosynthMod, only : NonleafMaintenanceRespiration
@@ -52,25 +52,25 @@ module FatesTestCohortPhysMod
   implicit none
   private
 
-  integer,  parameter :: newton_max_iters = 10          ! matches LeafLayerPhotosynthesis's private max_iters - solve_iter beyond this means the call fell back to CiBisection
+  integer,  parameter :: newton_max_iters = 10
 
   type, public :: cohort_phys_type
 
-     private
+    private
 
-     type(leaf_capacity_type), allocatable :: cap_z(:) ! per-leaf-layer photosynthetic capacity, stomatal conductance terms and dark respiration
-     real(r8), allocatable :: nscaler_z(:)             ! per-leaf-layer nitrogen-scaling factor [0-1], cached daily by DailySetup, consumed every substep by SubdailyStep
+    type(leaf_capacity_type), allocatable :: cap_z(:) ! per-leaf-layer photosynthetic capacity, stomatal conductance terms and dark respiration
+    real(r8), allocatable :: nscaler_z(:)             ! per-leaf-layer nitrogen-scaling factor [0-1]
 
-     real(r8) :: live_stem_n, live_croot_n   ! aboveground/belowground sapwood N [kgN/plant] - feed NonleafMaintenanceRespiration
-     real(r8) :: fnrt_n                      ! fine root N [kgN/plant] - feeds NonleafMaintenanceRespiration
-     real(r8) :: maintresp_reduction_factor  ! storage-based throttle on maintenance respiration [0-1]
+    real(r8) :: live_stem_n, live_croot_n   ! aboveground/belowground sapwood N [kgN/plant]
+    real(r8) :: fnrt_n                      ! fine root N [kgN/plant]
+    real(r8) :: maintresp_reduction_factor  ! storage-based throttle on maintenance respiration [0-1]
 
    contains
 
-     procedure, public :: DailySetup
-     procedure, public :: SubdailyStep
-     procedure, public :: GrossAssimAndResp
-     procedure, public :: LeafNetAssimSweep
+    procedure, public :: DailySetup
+    procedure, public :: SubdailyStep
+    procedure, public :: GrossAssimAndResp
+    procedure, public :: LeafNetAssimSweep
 
   end type cohort_phys_type
 
@@ -86,7 +86,7 @@ contains
 
     ! ARGUMENTS:
     class(cohort_phys_type), intent(inout) :: this ! cohort physiology object
-    integer,                  intent(in)    :: nv   ! cohort's current number of occupied leaf layers
+    integer,                  intent(in)    :: nv  ! cohort's current number of occupied leaf layers
 
     if (allocated(this%cap_z)) then
       if (size(this%cap_z) /= nv) then
@@ -104,25 +104,22 @@ contains
   subroutine DailySetup(this, cohort, pft, frac_store)
     !
     ! DESCRIPTION:
-    ! Once-per-day setup: the storage-based maintenance-respiration throttle,
-    ! sapwood/fine-root N (feed NonleafMaintenanceRespiration in SubdailyStep), and
-    ! the per-leaf-layer nitrogen-scaling factor (nscaler_z - depends on
-    ! cumulative LAI above each layer, which only changes daily). The
-    ! temperature-dependent capacity/dark-respiration rates that consume
-    ! nscaler_z are computed per-substep in SubdailyStep instead, from this
-    ! day's nscaler_z and that substep's env%tempk.
+    ! Calculate a daily setup: storage-based maintenance-respiration throttle,
+    ! sapwood/fine-root N, and per-leaf-layer nitrogen-scaling factor (nscaler_z depends on
+    ! cumulative LAI above each layer, which only changes daily)
+    !
 
     ! ARGUMENTS:
     class(cohort_phys_type), intent(inout) :: this       ! cohort physiology object
-    type(fates_cohort_type), intent(in)    :: cohort      ! cohort to set up for today
-    integer,                  intent(in)    :: pft         ! plant functional type index
-    real(r8),                 intent(out)   :: frac_store  ! ratio of storage carbon to target_leaf_c [-]
+    type(fates_cohort_type), intent(in)    :: cohort     ! cohort to set up for today
+    integer,                  intent(in)   :: pft        ! plant functional type index
+    real(r8),                 intent(out)  :: frac_store ! ratio of storage carbon to target_leaf_c [-]
 
     ! LOCALS:
-    real(r8) :: target_leaf_c  ! reference leaf biomass when fully flushed [kgC] (see EDMortalityFunctionsMod.F90's comment on this same calculation - the target intentionally ignores the plant's current elongation state)
+    real(r8) :: target_leaf_c  ! reference leaf biomass when fully flushed [kgC]
     real(r8) :: sapw_c, fnrt_c ! sapwood/fine root carbon [kgC/plant]
 
-    ! storage-based throttle on maintenance respiration. The elongation factor
+    ! storage-based maintenance respiration. The elongation factor
     ! is intentionally 1.0 here (fully flushed), not the cohort's current
     ! elongf_leaf - matches EDMortalityFunctionsMod.F90's identical calculation,
     ! whose comment explains the reference target must stay at full-flush so the
@@ -135,11 +132,7 @@ contains
       cohort%prt%GetState(store_organ, carbon12_element), frac_store)
     call LowstorageMainRespReduction(frac_store, pft, this%maintresp_reduction_factor)
 
-    ! aboveground/belowground sapwood N and fine root N - feed
-    ! NonleafMaintenanceRespiration in SubdailyStep. This driver never damages the
-    ! crown (crowndamage=1, undamaged), so the aboveground/belowground sapwood
-    ! split is just allom_agb_frac with no damage correction, unlike the full
-    ! crown-damage-aware split in FatesPlantRespPhotosynthMod.F90
+    ! aboveground/belowground sapwood N and fine root N
     sapw_c = cohort%prt%GetState(sapw_organ, carbon12_element)
     fnrt_c = cohort%prt%GetState(fnrt_organ, carbon12_element)
     this%live_stem_n  = sapw_c * prt_params%allom_agb_frac(pft) *              &
@@ -163,44 +156,44 @@ contains
     !
     ! DESCRIPTION:
     ! A single sub-daily carbon uptake step: refresh the temperature-dependent
-    ! leaf photosynthetic capacity/dark-respiration rates from today's cached
-    ! nscaler_z (DailySetup) and this substep's env%tempk (matching production's
+    ! leaf photosynthetic capacity/dark-respiration rates from today's
+    ! nscaler_z (from DailySetup) and this substep's env%tempk (matching production's
     ! per-timestep LeafLayerBiophysicalRates pattern), then prescribed absorbed
     ! PAR (light_env) -> leaf photosynthesis -> a per-individual GPP and leaf
     ! dark respiration, plus non-leaf (stem/root) maintenance respiration for
     ! the same substep.
 
     ! ARGUMENTS:
-    class(cohort_phys_type), intent(inout) :: this        ! cohort physiology object
-    type(fates_cohort_type), intent(inout) :: cohort       ! cohort to step
-    integer,                  intent(in)    :: pft          ! plant functional type index
-    type(environment_type),  intent(in)    :: env          ! prescribed atmospheric/soil boundary conditions
-    type(light_env_type),    intent(in)    :: light_env    ! this substep's absorbed-PAR/LAI profile
-    real(r8),                 intent(in)    :: lnc_top      ! leaf N content at the canopy top [gN/m2 leaf]
-    real(r8),                 intent(in)    :: step_size    ! model time step [s]
-    integer,                  intent(inout) :: n_photo_calls     ! running count of LeafLayerPhotosynthesis calls
-    integer,                  intent(inout) :: n_bisection_calls ! running count of calls that fell back to CiBisection
-    integer,                  intent(inout) :: max_solve_iter    ! running max Ci-solver iteration count
-    integer,                  intent(inout) :: sum_solve_iter    ! running sum of Ci-solver iteration counts, for a mean once divided by n_photo_calls
-    real(r8),                 intent(out)   :: gpp_tstep        ! this substep's GPP [kgC/indiv/s]
-    real(r8),                 intent(out)   :: rdark_tstep      ! this substep's leaf dark respiration [kgC/indiv/s]
-    real(r8),                 intent(out)   :: nonleaf_mr_tstep ! this substep's non-leaf (stem/root) maintenance respiration [kgC/indiv/s]
+    class(cohort_phys_type), intent(inout) :: this              ! cohort physiology object
+    type(fates_cohort_type), intent(inout) :: cohort            ! cohort to step
+    integer,                 intent(in)    :: pft               ! plant functional type index
+    type(environment_type),  intent(in)    :: env               ! prescribed atmospheric/soil boundary conditions
+    type(light_env_type),    intent(in)    :: light_env         ! this substep's absorbed-PAR/LAI profile
+    real(r8),                intent(in)    :: lnc_top           ! leaf N content at the canopy top [gN/m2 leaf]
+    real(r8),                intent(in)    :: step_size         ! model time step [s]
+    integer,                 intent(inout) :: n_photo_calls     ! running count of LeafLayerPhotosynthesis calls
+    integer,                 intent(inout) :: n_bisection_calls ! running count of calls that fell back to CiBisection
+    integer,                 intent(inout) :: max_solve_iter    ! running max Ci-solver iteration count
+    integer,                 intent(inout) :: sum_solve_iter    ! running sum of Ci-solver iteration counts, for a mean once divided by n_photo_calls
+    real(r8),                intent(out)   :: gpp_tstep         ! this substep's GPP [kgC/indiv/s]
+    real(r8),                intent(out)   :: rdark_tstep       ! this substep's leaf dark respiration [kgC/indiv/s]
+    real(r8),                intent(out)   :: nonleaf_mr_tstep  ! this substep's non-leaf (stem/root) maintenance respiration [kgC/indiv/s]
 
     ! LOCALS:
-    integer  :: iv                         ! leaf-layer looping index
+    integer  :: iv                          ! leaf-layer looping index
     real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point at env%tempk [Pa]
-    integer  :: solve_iter_sun             ! Ci-solver iteration count, sunlit call - >newton_max_iters means it fell back to CiBisection
-    integer  :: solve_iter_sha             ! Ci-solver iteration count, shaded call - >newton_max_iters means it fell back to CiBisection
-    real(r8) :: psn_layer                  ! area-weighted mean gross photosynthesis for the layer [umolC/m2 leaf/s]
-    real(r8) :: anet_layer                 ! area-weighted mean net photosynthesis for the layer [umolC/m2 leaf/s] - unused here, since a whole-plant carbon balance integrates GROSS assimilation and accounts for respiration separately
-    real(r8) :: lai_layer                  ! this layer's total leaf area index [m2 leaf/m2 ground]
-    real(r8) :: cohort_layer_eleaf_area    ! cohort's effective leaf area in the current layer [m2]
-    real(r8) :: gpp_sum, rdark_sum         ! running per-substep GPP/dark-respiration accumulators [umolC/s]
+    integer  :: solve_iter_sun              ! Ci-solver iteration count, sunlit call - >newton_max_iters means it fell back to CiBisection
+    integer  :: solve_iter_sha              ! Ci-solver iteration count, shaded call - >newton_max_iters means it fell back to CiBisection
+    real(r8) :: psn_layer                   ! area-weighted mean gross photosynthesis for the layer [umolC/m2 leaf/s]
+    real(r8) :: anet_layer                  ! area-weighted mean net photosynthesis for the layer [umolC/m2 leaf/s] - unused here, since a whole-plant carbon balance integrates GROSS assimilation and accounts for respiration separately
+    real(r8) :: lai_layer                   ! this layer's total leaf area index [m2 leaf/m2 ground]
+    real(r8) :: cohort_layer_eleaf_area     ! cohort's effective leaf area in the current layer [m2]
+    real(r8) :: gpp_sum, rdark_sum          ! running per-substep GPP/dark-respiration accumulators [umolC/s]
 
     ! prescribed absorbed PAR -> leaf photosynthesis, one leaf layer at a time:
     ! this layer's temperature-dependent capacity/dark-respiration rates are
     ! refreshed (LeafLayerCapacity) from env%tempk/dayl_factor/t_growth/t_home/
-    ! btran and today's cached nscaler_z (DailySetup), matching production's
+    ! btran and today's nscaler_z (DailySetup), matching production's
     ! per-timestep LeafLayerBiophysicalRates pattern, then the layer's sunlit
     ! and shaded halves are evaluated at that capacity and area-weighted into a
     ! single per-layer rate (LeafLayerSunShade, which also converts
@@ -210,10 +203,8 @@ contains
     ! ScaleLeafLayerFluxToCohort's formula, which is private to
     ! FatesPlantRespPhotosynthMod and so not directly reusable here.
     !
-    ! The Michaelis-Menten constants/CO2 compensation point depend only on
-    ! can_press/can_o2_ppress/env%tempk, none of which vary down the canopy
-    ! within one substep, so GetCanopyGasParameters is hoisted out of the layer
-    ! loop rather than recomputed per photosynthesis call
+    
+    ! The Michaelis-Menten constants/CO2
     call GetCanopyGasParameters(env%can_press, env%can_o2_ppress, env%tempk,   &
       mm_kco2, mm_ko2, co2_cpoint)
 
@@ -222,8 +213,7 @@ contains
     do iv = 1, cohort%nv
 
       ! capacity is independent of sunlit vs. shaded, so it is computed once
-      ! per layer and cached into cap_z(iv) - see GrossAssimAndResp/
-      ! LeafNetAssimSweep, which reuse it "frozen" from here
+      ! per layer and saved to cap_z(iv)
       call LeafLayerCapacity(pft, env%tempk, env%t_growth, env%t_home,         &
         this%nscaler_z(iv), env%dayl_factor, env%btran, cohort%vcmax25top,     &
         cohort%jmax25top, cohort%kp25top, lnc_top, this%cap_z(iv))

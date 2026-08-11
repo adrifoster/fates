@@ -61,7 +61,7 @@ program FatesRadiation
       r_diff_up, rb_abs_leaf, rd_abs_leaf, r_abs_stem, leaf_sun_frac)
 
       use FatesUnitTestIOMod, only : OpenNCFile, RegisterNCDims, CloseNCFile
-      use FatesUnitTestIOMod, only : WriteVar, RegisterVar
+      use FatesUnitTestIOMod, only : WriteVar, RegisterVarAtts
       use FatesUnitTestIOMod, only : type_double, type_int
       use FatesConstantsMod,  only : r8 => fates_r8
       implicit none
@@ -182,7 +182,7 @@ subroutine WriteRadiationData(out_file, n_vai, num_swb, vai, r_beam, r_diff_dn, 
   use FatesConstantsMod,  only : r8 => fates_r8
   use FatesUnitTestIOMod, only : OpenNCFile, RegisterNCDims, CloseNCFile
   use FatesUnitTestIOMod, only : WriteVar
-  use FatesUnitTestIOMod, only : RegisterVar
+  use FatesUnitTestIOMod, only : RegisterVarAtts
   use FatesUnitTestIOMod, only : EndNCDef
   use FatesUnitTestIOMod, only : type_double, type_int
 
@@ -227,58 +227,45 @@ subroutine WriteRadiationData(out_file, n_vai, num_swb, vai, r_beam, r_diff_dn, 
   call RegisterNCDims(ncid, dim_names, (/n_vai, num_swb/), 2, dimIDs)
 
   ! register vai
-  call RegisterVar(ncid, dim_names(1), dimIDs(1:1), type_double,                    &
-    [character(len=20)  :: 'units', 'long_name'],                                   &
-    [character(len=150) :: 'm2 m-2', 'cumulative vegetation area index from canopy top (bin bottom)'], &
-    2, vaiID)
+  call RegisterVarAtts(ncid, dim_names(1), dimIDs(1:1), type_double, 'm2 m-2',          &
+    'cumulative vegetation area index from canopy top (bin bottom)', vaiID)
 
   ! register band
-  call RegisterVar(ncid, dim_names(2), dimIDs(2:2), type_int,               &
-    [character(len=20)  :: 'units', 'long_name'],                            &
-    [character(len=150) :: '', 'shortwave band (1=visible, 2=near-infrared)'], &
-    2, bandID)
+  call RegisterVarAtts(ncid, dim_names(2), dimIDs(2:2), type_int, '',                   &
+    'shortwave band (1=visible, 2=near-infrared)', bandID)
 
   ! register normalized downwelling beam intensity
-  call RegisterVar(ncid, 'r_beam', dimIDs(1:2), type_double,                       &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', '-', 'normalized downwelling beam radiation intensity'], &
-    3, rbeamID)
+  call RegisterVarAtts(ncid, 'r_beam', dimIDs(1:2), type_double, '-',                   &
+    'normalized downwelling beam radiation intensity', rbeamID, coordinates='vai band')
 
   ! register normalized downwelling diffuse intensity
-  call RegisterVar(ncid, 'r_diff_dn', dimIDs(1:2), type_double,                    &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', '-', 'normalized downwelling diffuse radiation intensity'], &
-    3, rdiffdnID)
+  call RegisterVarAtts(ncid, 'r_diff_dn', dimIDs(1:2), type_double, '-',                &
+    'normalized downwelling diffuse radiation intensity', rdiffdnID,                    &
+    coordinates='vai band')
 
   ! register normalized upwelling diffuse intensity
-  call RegisterVar(ncid, 'r_diff_up', dimIDs(1:2), type_double,                    &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', '-', 'normalized upwelling diffuse radiation intensity'], &
-    3, rdiffupID)
+  call RegisterVarAtts(ncid, 'r_diff_up', dimIDs(1:2), type_double, '-',                &
+    'normalized upwelling diffuse radiation intensity', rdiffupID,                      &
+    coordinates='vai band')
 
   ! register beam radiation absorbed by leaves
-  call RegisterVar(ncid, 'rb_abs_leaf', dimIDs(1:2), type_double,                  &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', 'W m-2', 'beam radiation absorbed by leaves, per vai bin'], &
-    3, rbabsleafID)
+  call RegisterVarAtts(ncid, 'rb_abs_leaf', dimIDs(1:2), type_double, 'W m-2',          &
+    'beam radiation absorbed by leaves, per vai bin', rbabsleafID,                      &
+    coordinates='vai band')
 
   ! register diffuse radiation absorbed by leaves
-  call RegisterVar(ncid, 'rd_abs_leaf', dimIDs(1:2), type_double,                  &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', 'W m-2', 'diffuse radiation absorbed by leaves, per vai bin'], &
-    3, rdabsleafID)
+  call RegisterVarAtts(ncid, 'rd_abs_leaf', dimIDs(1:2), type_double, 'W m-2',          &
+    'diffuse radiation absorbed by leaves, per vai bin', rdabsleafID,                   &
+    coordinates='vai band')
 
   ! register radiation absorbed by stems
-  call RegisterVar(ncid, 'r_abs_stem', dimIDs(1:2), type_double,                   &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', 'W m-2', 'beam+diffuse radiation absorbed by stems, per vai bin'], &
-    3, rabsstemID)
+  call RegisterVarAtts(ncid, 'r_abs_stem', dimIDs(1:2), type_double, 'W m-2',           &
+    'beam+diffuse radiation absorbed by stems, per vai bin', rabsstemID,                &
+    coordinates='vai band')
 
   ! register sunlit fraction of leaves
-  call RegisterVar(ncid, 'leaf_sun_frac', dimIDs(1:2), type_double,                &
-    [character(len=20)  :: 'coordinates', 'units', 'long_name'],                    &
-    [character(len=150) :: 'vai band', '-', 'sunlit fraction of leaf area, per vai bin'], &
-    3, sunfracID)
+  call RegisterVarAtts(ncid, 'leaf_sun_frac', dimIDs(1:2), type_double, '-',            &
+    'sunlit fraction of leaf area, per vai bin', sunfracID, coordinates='vai band')
 
   ! finish defining variables
   call EndNCDef(ncid)

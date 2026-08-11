@@ -98,3 +98,20 @@ def get_color_palette(number: int) -> list:
     ]
 
     return colors[:number]
+
+
+def style_axis(axis):
+    """Applies a shared minimalist axis style
+
+    Lives here rather than in an individual test class so the functional tests
+    share one look; leaf_level_photo_test.py and single_cohort_test.py each
+    still carry a private copy of this and can migrate to it.
+
+    Args:
+        axis (matplotlib.axes.Axes): axis to style
+    """
+    axis.spines["top"].set_visible(False)
+    axis.spines["right"].set_visible(False)
+    axis.tick_params(bottom=False, left=False)
+    axis.set_axisbelow(True)
+    axis.grid(axis="y", lw=0.5, alpha=0.3, linestyle="--")

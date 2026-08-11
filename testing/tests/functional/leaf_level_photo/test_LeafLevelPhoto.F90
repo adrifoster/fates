@@ -11,17 +11,12 @@ program FatesTestLeafLevelPhoto
   ! temperature being swept. Both are held fixed at the same default leaf temperature
   ! for every sweep and every point.
   !
-  ! The soil water content sweep does NOT vary btran directly. FATES's real
-  ! btran (biogeophys/EDBtranMod.F90::btran_ed) is computed from soil matric
-  ! potential (smp) via, for a single unfrozen soil layer with root fraction 1
-  ! (this test has no soil column, so those simplifications stand in for the
-  ! multi-layer/root-weighted production sum):
-  !     smp_node = max(smpsc, smp)
-  !     btran    = min((smp_node - smpsc)/(smpso - smpsc), 1.0)
-  ! where smpsc/smpso are the PFT parameters (soil matric potential at full stomatal 
-  ! closure/opening). This test sweeps a soil water content fraction in [0, 1] and
-  ! maps it linearly onto smp between smpsc (fraction=0) and saturation,
-  ! smp=0 (fraction=1): smp(frac) = smpsc*(1-frac). 
+  ! The soil water content sweep does not vary btran directly. It sweeps a soil
+  ! water content fraction in [0, 1], maps it onto a soil matric potential, since 
+  ! these drivers have no soil texture from which a real retention curve could be built), 
+  ! and derives btran from that via BtranFromSMP, which is production's own 
+  ! EDBtranMod.F90::btran_ed formula specialized to the single unfrozen layer at 
+  ! root fraction 1 these drivers assume
   !
 
   use FatesConstantsMod,           only : r8 => fates_r8
@@ -35,14 +30,19 @@ program FatesTestLeafLevelPhoto
   use FatesFactoryMod,             only : InitializeGlobals
   use FatesGlobals,                only : FatesGlobalsInit
   use FatesInterfaceTypesMod,      only : numpft
+  use FatesInterfaceTypesMod,      only : hlm_maintresp_leaf_model
+  use FatesConstantsMod,           only : lmrmodel_ryan_1991
+  use FatesConstantsMod,           only : lmrmodel_atkin_etal_2017
   use LeafBiophysicsMod,           only : lb_params
   use LeafBiophysicsMod,           only : FvCB1980, medlyn_model, net_assim_model
   use LeafBiophysicsMod,           only : photosynth_acclim_model_kumarathunge_etal_2019
   use LeafBiophysicsMod,           only : QSat
   use FatesTestEnvironmentMod,     only : environment_type
+  use FatesTestEnvironmentMod,     only : default_vpd, default_nscaler, default_par
+  use FatesTestEnvironmentMod,     only : BtranFromSMP, SoilMatricPotential
   use FatesTestLeafPhotoMod,       only : EvaluateLeafPhotosynthesis, LeafNitrogenContent
   use FatesUnitTestIOMod,          only : OpenNCFile, RegisterNCDims, CloseNCFile
-  use FatesUnitTestIOMod,          only : WriteVar, RegisterVar, EndNCDef
+  use FatesUnitTestIOMod,          only : WriteVar, RegisterVarAtts, EndNCDef
   use FatesUnitTestIOMod,          only : type_double, type_int
 
   implicit none
@@ -50,10 +50,12 @@ program FatesTestLeafLevelPhoto
   ! LOCALS:
   character(len=:), allocatable :: param_file ! input parameter file
   type(environment_type)        :: env        ! prescribed atmospheric boundary conditions
-  real(r8), allocatable         :: lnc_top(:)  ! leaf N content at the canopy top, per pft [gN/m2 leaf]
-  real(r8)                      :: vcmax25top_pft ! maximum carboxylation rate [umol/m2/s]
-  real(r8)                      :: jmax25top_pft  ! maximum electron transport rate [umol/m2/s]
-  real(r8)                      :: kp25top_pft    ! initial slope of C4 CO2 response [umol/m2/s]
+  real(r8)                      :: lnc_top    ! leaf N content at the canopy top [gN/m2 leaf]
+  real(r8)                      :: vcmax25top ! top-of-canopy carboxylation rate at 25degC [umol/m2/s]
+  real(r8)                      :: jmax25top  ! top-of-canopy electron transport rate at 25degC [umol/m2/s]
+  real(r8)                      :: kp25top    ! top-of-canopy initial slope of C4 CO2 response at 25degC [umol/m2/s]
+  real(r8)                      :: smpsc      ! soil matric potential at full stomatal closure [mm, negative]
+  real(r8)                      :: smpso      ! soil matric potential at full stomatal opening [mm, negative]
 
   ! swept-variable value arrays
   real(r8), allocatable :: par_vals(:)      ! swept PAR values [umol/m2/s]
@@ -66,32 +68,22 @@ program FatesTestLeafLevelPhoto
   ! temperature and VPD change vapor pressure at all)
   real(r8), allocatable :: veg_esat_bytemp(:)   ! saturation vapor pressure at each swept leaf temperature [Pa]
   real(r8), allocatable :: can_vpress_bytemp(:) ! canopy air vapor pressure at each swept leaf temperature, fixed default VPD [Pa]
-  real(r8), allocatable :: veg_esat_byvpd(:)    ! saturation vapor pressure at the fixed default leaf temperature [Pa] (constant across this sweep - included for symmetry with veg_esat_bytemp)
   real(r8), allocatable :: can_vpress_byvpd(:)  ! canopy air vapor pressure at each swept VPD (= veg_esat - vpd), fixed default leaf temperature [Pa]
-  real(r8), allocatable :: btran_bysoilfrac(:)  ! btran derived from each swept soil water content fraction (see header comment) [0-1]
+  real(r8), allocatable :: btran_bysoilfrac(:)  ! btran derived from each swept soil water content fraction [0-1]
 
-  ! sweep output, each dimensioned (n_sweep_points, numpft)
-  real(r8), allocatable :: anet_bypar(:,:), agross_bypar(:,:), gs_bypar(:,:), ci_bypar(:,:)
-  real(r8), allocatable :: anet_byco2(:,:), agross_byco2(:,:), gs_byco2(:,:), ci_byco2(:,:)
-  real(r8), allocatable :: anet_byvpd(:,:), agross_byvpd(:,:), gs_byvpd(:,:), ci_byvpd(:,:)
-  real(r8), allocatable :: anet_bytemp(:,:), agross_bytemp(:,:), gs_bytemp(:,:), ci_bytemp(:,:)
-  real(r8), allocatable :: anet_bysoilfrac(:,:), agross_bysoilfrac(:,:), gs_bysoilfrac(:,:), ci_bysoilfrac(:,:)
+  ! sweep output, each dimensioned (n_sweep_points)
+  real(r8), allocatable :: anet_bypar(:), agross_bypar(:), gs_bypar(:), ci_bypar(:)
+  real(r8), allocatable :: anet_byco2(:), agross_byco2(:), gs_byco2(:), ci_byco2(:)
+  real(r8), allocatable :: anet_byvpd(:), agross_byvpd(:), gs_byvpd(:), ci_byvpd(:)
+  real(r8), allocatable :: anet_bytemp(:), agross_bytemp(:), gs_bytemp(:), ci_bytemp(:)
+  real(r8), allocatable :: anet_bysoilfrac(:), agross_bysoilfrac(:), gs_bysoilfrac(:), ci_bysoilfrac(:)
 
   integer :: n_par, n_co2, n_vpd, n_temp, n_soilfrac ! sweep array sizes
   integer :: i ! looping index
-
-  ! target_pft's soil matric potential thresholds
-  real(r8) :: smpsc_pft ! soil matric potential at full stomatal closure [mm]
-  real(r8) :: smpso_pft ! soil matric potential at full stomatal opening [mm]
-
+  
   ! CONSTANTS:
-  integer, parameter :: target_pft = 6 ! PFT index to evaluate (1-based)
-
-  ! default reference conditions
-  real(r8), parameter :: default_veg_tempk   = 25.0_r8 + t_water_freeze_k_1atm ! [K]
-  real(r8), parameter :: default_vpd         = 1000.0_r8  ! [Pa] leaf-to-air VPD, esat(Tleaf) - eair
-  real(r8), parameter :: default_par         = 1500.0_r8  ! [umol/m2/s]
-  real(r8), parameter :: default_nscaler     = 1.0_r8     ! [0-1]
+  integer,          parameter :: target_pft = 6 ! PFT index to evaluate (1-based)
+  character(len=*), parameter :: out_file = 'leaf_level_photo_out.nc' ! output file
 
   ! sweep ranges
   real(r8), parameter :: min_temp = 5.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
@@ -100,13 +92,11 @@ program FatesTestLeafLevelPhoto
   real(r8), parameter :: min_co2  = 250.0_r8,  max_co2  = 1000.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
   real(r8), parameter :: soilfrac_inc = 0.02_r8 ! [0-1]
 
-  character(len=*), parameter :: out_file = 'leaf_level_photo_out.nc' ! output file
-
   param_file = command_line_arg(1)
   call ReadParameters(param_file)
 
-  smpsc_pft = EDPftvarcon_inst%smpsc(target_pft)
-  smpso_pft = EDPftvarcon_inst%smpso(target_pft)
+  smpsc = EDPftvarcon_inst%smpsc(target_pft)
+  smpso = EDPftvarcon_inst%smpso(target_pft)
 
   ! step_size is unused by anything this test exercises (no time-stepping occurs),
   ! but InitializeGlobals requires a value
@@ -115,27 +105,23 @@ program FatesTestLeafLevelPhoto
   call FatesGlobalsInit(6, .false.)
   call PRTDerivedParams()
 
-  ! host-model-namelist-controlled leaf biophysics switches - matches
-  ! test_SingleCohort.F90's choices for consistency across this test suite
+  ! host-model-namelist-controlled leaf biophysics switches
+  hlm_maintresp_leaf_model = lmrmodel_ryan_1991
   lb_params%electron_transport_model = FvCB1980
-  lb_params%stomatal_model           = medlyn_model
-  lb_params%stomatal_assim_model     = net_assim_model
-  lb_params%photo_tempsens_model     = photosynth_acclim_model_kumarathunge_etal_2019
+  lb_params%stomatal_model = medlyn_model
+  lb_params%stomatal_assim_model = net_assim_model
+  lb_params%photo_tempsens_model = photosynth_acclim_model_kumarathunge_etal_2019
 
   ! leaf N content for target_pft - constant for the whole run
-  allocate(lnc_top(1))
-  lnc_top(1) = LeafNitrogenContent(target_pft)
+  lnc_top = LeafNitrogenContent(target_pft)
 
   ! reference (25C, canopy-top) photosynthetic capacity for target_pft - the
-  ! flat PFT default (no cohort/acclimation state exists in this driver) -
   ! constant for the whole run
-  vcmax25top_pft = EDPftvarcon_inst%vcmax25top(target_pft,1)
-  jmax25top_pft  = param_derived%jmax25top(target_pft,1)
-  kp25top_pft    = param_derived%kp25top(target_pft,1)
+  vcmax25top = EDPftvarcon_inst%vcmax25top(target_pft,1)
+  jmax25top = param_derived%jmax25top(target_pft,1)
+  kp25top = param_derived%kp25top(target_pft,1)
 
-  ! atmospheric constants not swept by this test (canopy pressure, background
-  ! CO2/O2 partial pressure, leaf boundary-layer conductance, dayl_factor,
-  ! btran - see FatesTestEnvironmentMod's shared reference-atmosphere defaults)
+  ! set atmospheric defaults
   call env%Init()
 
   ! ---------------------------------------------------------------------------------------
@@ -172,14 +158,14 @@ program FatesTestLeafLevelPhoto
   end do
 
   allocate(veg_esat_bytemp(n_temp), can_vpress_bytemp(n_temp))
-  allocate(veg_esat_byvpd(n_vpd), can_vpress_byvpd(n_vpd))
+  allocate(can_vpress_byvpd(n_vpd))
   allocate(btran_bysoilfrac(n_soilfrac))
 
-  allocate(anet_bypar(n_par, 1), agross_bypar(n_par, 1), gs_bypar(n_par, 1), ci_bypar(n_par, 1))
-  allocate(anet_byco2(n_co2, 1), agross_byco2(n_co2, 1), gs_byco2(n_co2, 1), ci_byco2(n_co2, 1))
-  allocate(anet_byvpd(n_vpd, 1), agross_byvpd(n_vpd, 1), gs_byvpd(n_vpd, 1), ci_byvpd(n_vpd, 1))
-  allocate(anet_bytemp(n_temp, 1), agross_bytemp(n_temp, 1), gs_bytemp(n_temp, 1), ci_bytemp(n_temp, 1))
-  allocate(anet_bysoilfrac(n_soilfrac, 1), agross_bysoilfrac(n_soilfrac, 1), gs_bysoilfrac(n_soilfrac, 1), ci_bysoilfrac(n_soilfrac, 1))
+  allocate(anet_bypar(n_par), agross_bypar(n_par), gs_bypar(n_par), ci_bypar(n_par))
+  allocate(anet_byco2(n_co2), agross_byco2(n_co2), gs_byco2(n_co2), ci_byco2(n_co2))
+  allocate(anet_byvpd(n_vpd), agross_byvpd(n_vpd), gs_byvpd(n_vpd), ci_byvpd(n_vpd))
+  allocate(anet_bytemp(n_temp), agross_bytemp(n_temp), gs_bytemp(n_temp), ci_bytemp(n_temp))
+  allocate(anet_bysoilfrac(n_soilfrac), agross_bysoilfrac(n_soilfrac), gs_bysoilfrac(n_soilfrac), ci_bysoilfrac(n_soilfrac))
 
   ! a shared default vapor-pressure state (leaf temperature and VPD both at
   ! their defaults) - reused as the fixed background for every sweep except
@@ -187,9 +173,9 @@ program FatesTestLeafLevelPhoto
   block
     real(r8) :: default_veg_esat, default_can_vpress
     real(r8) :: qs_dummy ! saturation specific humidity output from QSat
-    real(r8) :: smp, smp_node ! soil matric potential at a swept soil water content fraction, and its full-closure-clamped value [mm]
+    real(r8) :: smp ! soil matric potential at a swept soil water content fraction [mm]
 
-    call QSat(default_veg_tempk, env%can_press, qs_dummy, default_veg_esat)
+    call QSat(env%tempk, env%can_press, qs_dummy, default_veg_esat)
     default_can_vpress = default_veg_esat - default_vpd
 
     ! ---------------------------------------------------------------------
@@ -198,12 +184,11 @@ program FatesTestLeafLevelPhoto
     print *, '----------------------------------------------------------------'
     print *, 'Exercising leaf photosynthesis for PAR'
     do i = 1, n_par
-      call EvaluateLeafPhotosynthesis(target_pft, par_vals(i), default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
-        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
-        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
-        agross_bypar(i,1), anet_bypar(i,1), gs_bypar(i,1), ci_bypar(i,1))
+      call EvaluateLeafPhotosynthesis(target_pft, par_vals(i), env%tempk,   &
+        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
+        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
+        kp25top, lnc_top, agross_bypar(i), anet_bypar(i), gs_bypar(i), ci_bypar(i))
     end do
 
     ! ---------------------------------------------------------------------
@@ -212,12 +197,11 @@ program FatesTestLeafLevelPhoto
     print *, '----------------------------------------------------------------'
     print *, 'Exercising leaf photosynthesis for CO2'
     do i = 1, n_co2
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, co2_vals(i),        &
-        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
-        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
-        agross_byco2(i,1), anet_byco2(i,1), gs_byco2(i,1), ci_byco2(i,1))
+      call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
+        env%tempk, env%tempk, env%can_press, co2_vals(i),                   &
+        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
+        kp25top, lnc_top, agross_byco2(i), anet_byco2(i), gs_byco2(i), ci_byco2(i))
     end do
 
     ! ---------------------------------------------------------------------
@@ -227,14 +211,12 @@ program FatesTestLeafLevelPhoto
     print *, '----------------------------------------------------------------'
     print *, 'Exercising leaf photosynthesis for VPD'
     do i = 1, n_vpd
-      veg_esat_byvpd(i) = default_veg_esat
       can_vpress_byvpd(i) = default_veg_esat - vpd_vals(i)
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
-        env%can_o2_ppress, veg_esat_byvpd(i), can_vpress_byvpd(i), env%gb,       &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
-        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
-        agross_byvpd(i,1), anet_byvpd(i,1), gs_byvpd(i,1), ci_byvpd(i,1))
+      call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
+        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
+        env%can_o2_ppress, default_veg_esat, can_vpress_byvpd(i), env%gb,   &
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
+        kp25top, lnc_top, agross_byvpd(i), anet_byvpd(i), gs_byvpd(i), ci_byvpd(i))
     end do
 
     ! ---------------------------------------------------------------------
@@ -248,11 +230,10 @@ program FatesTestLeafLevelPhoto
       call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
       can_vpress_bytemp(i) = veg_esat_bytemp(i) - default_vpd
       call EvaluateLeafPhotosynthesis(target_pft, default_par, temp_vals(i),     &
-        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
+        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                 &
         env%can_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top_pft,             &
-        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
-        agross_bytemp(i,1), anet_bytemp(i,1), gs_bytemp(i,1), ci_bytemp(i,1))
+        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top,      &
+        kp25top, lnc_top, agross_bytemp(i), anet_bytemp(i), gs_bytemp(i), ci_bytemp(i))
     end do
 
     ! ---------------------------------------------------------------------
@@ -262,15 +243,14 @@ program FatesTestLeafLevelPhoto
     print *, '----------------------------------------------------------------'
     print *, 'Exercising leaf photosynthesis for soil water content'
     do i = 1, n_soilfrac
-      smp = smpsc_pft * (1.0_r8 - soilfrac_vals(i))
-      smp_node = max(smpsc_pft, smp)
-      btran_bysoilfrac(i) = min((smp_node - smpsc_pft) / (smpso_pft - smpsc_pft), 1.0_r8)
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, default_veg_tempk, &
-        default_veg_tempk, default_veg_tempk, env%can_press, env%can_co2_ppress, &
-        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,         &
-        default_nscaler, env%dayl_factor, btran_bysoilfrac(i), vcmax25top_pft,   &
-        jmax25top_pft, kp25top_pft, lnc_top(1),                                  &
-        agross_bysoilfrac(i,1), anet_bysoilfrac(i,1), gs_bysoilfrac(i,1), ci_bysoilfrac(i,1))
+      smp = SoilMatricPotential(soilfrac_vals(i), smpsc_pft)
+      btran_bysoilfrac(i) = BtranFromSMP(smp, smpsc_pft, smpso_pft)
+      call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,             &
+        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                      &
+        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,              &
+        default_nscaler, env%dayl_factor, btran_bysoilfrac(i), vcmax25top, jmax25top, &
+        kp25top, lnc_top, agross_bysoilfrac(i), anet_bysoilfrac(i), gs_bysoilfrac(i), &
+        ci_bysoilfrac(i))
     end do
   end block
 
@@ -289,14 +269,13 @@ contains
     ! DESCRIPTION:
     ! Writes every sweep's swept values, derived vapor-pressure/btran
     ! diagnostics (temperature/VPD/soil-water-content sweeps only), and
-    ! per-pft agross/anet/gs/ci to netCDF.
+    ! agross/anet/gs/ci to netCDF.
 
     ! LOCALS:
-    integer, allocatable :: pft_indices(:) ! pft index coordinate values
     integer              :: ncid           ! netcdf file id
-    character(len=20)    :: dim_names(6)   ! dimension names
-    integer              :: dimIDs(6)      ! dimension IDs
-    integer              :: parID, co2ID, vpdID, tempID, soilfracID, pftID
+    character(len=20)    :: dim_names(5)   ! dimension names
+    integer              :: dimIDs(5)      ! dimension IDs
+    integer              :: parID, co2ID, vpdID, tempID, soilfracID
     integer              :: vegesatbytempID, canvpressbytempID
     integer              :: vegesatbyvpdID, canvpressbyvpdID
     integer              :: btranbysoilfracID
@@ -306,114 +285,94 @@ contains
     integer              :: agrossbytempID, anetbytempID, gsbytempID, cibytempID
     integer              :: agrossbysoilfracID, anetbysoilfracID, gsbysoilfracID, cibysoilfracID
 
-    allocate(pft_indices(1))
-    pft_indices(1) = target_pft
-
-    dim_names = [character(len=20) :: 'par', 'co2', 'vpd', 'temp', 'soilfrac', 'pft']
+    dim_names = [character(len=20) :: 'par', 'co2', 'vpd', 'temp', 'soilfrac']
 
     call OpenNCFile(trim(out_file), ncid, 'readwrite')
 
-    call RegisterNCDims(ncid, dim_names, (/n_par, n_co2, n_vpd, n_temp, n_soilfrac, 1/), 6, dimIDs)
+    call RegisterNCDims(ncid, dim_names, (/n_par, n_co2, n_vpd, n_temp, n_soilfrac/), 5, dimIDs)
 
-    call RegisterVar(ncid, dim_names(1), dimIDs(1:1), type_double,               &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'umol m-2 s-1', 'swept incident PAR'], 2, parID)
-    call RegisterVar(ncid, dim_names(2), dimIDs(2:2), type_double,               &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'Pa', 'swept CO2 partial pressure'], 2, co2ID)
-    call RegisterVar(ncid, dim_names(3), dimIDs(3:3), type_double,               &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'Pa', 'swept leaf-to-air vapor pressure deficit'], 2, vpdID)
-    call RegisterVar(ncid, dim_names(4), dimIDs(4:4), type_double,               &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'K', 'swept leaf temperature'], 2, tempID)
-    call RegisterVar(ncid, dim_names(5), dimIDs(5:5), type_double,               &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: '-', 'swept soil water content, fraction of saturation'], 2, soilfracID)
-    call RegisterVar(ncid, dim_names(6), dimIDs(6:6), type_int,                  &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: '-', 'plant functional type'], 2, pftID)
+    call RegisterVarAtts(ncid, dim_names(1), dimIDs(1:1), type_double, 'umol m-2 s-1',  &
+      'swept incident PAR', parID)
+    call RegisterVarAtts(ncid, dim_names(2), dimIDs(2:2), type_double, 'Pa',            &
+      'swept CO2 partial pressure', co2ID)
+    call RegisterVarAtts(ncid, dim_names(3), dimIDs(3:3), type_double, 'Pa',            &
+      'swept leaf-to-air vapor pressure deficit', vpdID)
+    call RegisterVarAtts(ncid, dim_names(4), dimIDs(4:4), type_double, 'K',             &
+      'swept leaf temperature', tempID)
+    call RegisterVarAtts(ncid, dim_names(5), dimIDs(5:5), type_double, '-',             &
+      'swept soil water content, fraction of saturation', soilfracID)
 
-    call RegisterVar(ncid, 'veg_esat_bytemp', dimIDs(4:4), type_double,          &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'Pa', 'saturation vapor pressure at each swept leaf temperature'], 2, vegesatbytempID)
-    call RegisterVar(ncid, 'can_vpress_bytemp', dimIDs(4:4), type_double,        &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'Pa', 'canopy air vapor pressure at each swept leaf temperature, fixed default VPD'], 2, canvpressbytempID)
-    call RegisterVar(ncid, 'veg_esat_byvpd', dimIDs(3:3), type_double,            &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'Pa', 'saturation vapor pressure at the fixed default leaf temperature'], 2, vegesatbyvpdID)
-    call RegisterVar(ncid, 'can_vpress_byvpd', dimIDs(3:3), type_double,          &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: 'Pa', 'canopy air vapor pressure at each swept VPD, fixed default leaf temperature'], 2, canvpressbyvpdID)
-    call RegisterVar(ncid, 'btran_bysoilfrac', dimIDs(5:5), type_double,          &
-      [character(len=20) :: 'units', 'long_name'],                              &
-      [character(len=150) :: '-', 'btran derived from each swept soil water content fraction'], 2, btranbysoilfracID)
+    call RegisterVarAtts(ncid, 'veg_esat_bytemp', dimIDs(4:4), type_double, 'Pa',       &
+      'saturation vapor pressure at each swept leaf temperature', vegesatbytempID)
+    call RegisterVarAtts(ncid, 'can_vpress_bytemp', dimIDs(4:4), type_double, 'Pa',     &
+      'canopy air vapor pressure at each swept leaf temperature, fixed default VPD',    &
+      canvpressbytempID)
+    call RegisterVarAtts(ncid, 'veg_esat_byvpd', dimIDs(3:3), type_double, 'Pa',        &
+      'saturation vapor pressure at the fixed default leaf temperature', vegesatbyvpdID)
+    call RegisterVarAtts(ncid, 'can_vpress_byvpd', dimIDs(3:3), type_double, 'Pa',      &
+      'canopy air vapor pressure at each swept VPD, fixed default leaf temperature',    &
+      canvpressbyvpdID)
+    call RegisterVarAtts(ncid, 'btran_bysoilfrac', dimIDs(5:5), type_double, '-',       &
+      'btran derived from each swept soil water content fraction', btranbysoilfracID)
 
-    call RegisterVar(ncid, 'agross_bypar', (/dimIDs(1), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'par pft', 'umolC m-2 s-1', 'gross photosynthesis vs. PAR'], 3, agrossbyparID)
-    call RegisterVar(ncid, 'anet_bypar', (/dimIDs(1), dimIDs(6)/), type_double,  &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'par pft', 'umolC m-2 s-1', 'net photosynthesis vs. PAR'], 3, anetbyparID)
-    call RegisterVar(ncid, 'gs_bypar', (/dimIDs(1), dimIDs(6)/), type_double,    &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'par pft', 'umol H2O m-2 s-1', 'stomatal conductance vs. PAR'], 3, gsbyparID)
-    call RegisterVar(ncid, 'ci_bypar', (/dimIDs(1), dimIDs(6)/), type_double,    &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'par pft', 'Pa', 'intracellular CO2 vs. PAR'], 3, cibyparID)
+    call RegisterVarAtts(ncid, 'agross_bypar', (/dimIDs(1)/), type_double,   &
+      'umolC m-2 s-1', 'gross photosynthesis vs. PAR', agrossbyparID,                   &
+      coordinates='par pft')
+    call RegisterVarAtts(ncid, 'anet_bypar', (/dimIDs(1)/), type_double,     &
+      'umolC m-2 s-1', 'net photosynthesis vs. PAR', anetbyparID, coordinates='par pft')
+    call RegisterVarAtts(ncid, 'gs_bypar', (/dimIDs(1)/), type_double,       &
+      'umol H2O m-2 s-1', 'stomatal conductance vs. PAR', gsbyparID,                    &
+      coordinates='par pft')
+    call RegisterVarAtts(ncid, 'ci_bypar', (/dimIDs(1))/), type_double, 'Pa', &
+      'intracellular CO2 vs. PAR', cibyparID, coordinates='par pft')
 
-    call RegisterVar(ncid, 'agross_byco2', (/dimIDs(2), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'co2 pft', 'umolC m-2 s-1', 'gross photosynthesis vs. CO2'], 3, agrossbyco2ID)
-    call RegisterVar(ncid, 'anet_byco2', (/dimIDs(2), dimIDs(6)/), type_double,  &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'co2 pft', 'umolC m-2 s-1', 'net photosynthesis vs. CO2'], 3, anetbyco2ID)
-    call RegisterVar(ncid, 'gs_byco2', (/dimIDs(2), dimIDs(6)/), type_double,    &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'co2 pft', 'umol H2O m-2 s-1', 'stomatal conductance vs. CO2'], 3, gsbyco2ID)
-    call RegisterVar(ncid, 'ci_byco2', (/dimIDs(2), dimIDs(6)/), type_double,    &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'co2 pft', 'Pa', 'intracellular CO2 vs. CO2'], 3, cibyco2ID)
+    call RegisterVarAtts(ncid, 'agross_byco2', (/dimIDs(2)/), type_double,   &
+      'umolC m-2 s-1', 'gross photosynthesis vs. CO2', agrossbyco2ID,                   &
+      coordinates='co2 pft')
+    call RegisterVarAtts(ncid, 'anet_byco2', (/dimIDs(2)/), type_double,     &
+      'umolC m-2 s-1', 'net photosynthesis vs. CO2', anetbyco2ID, coordinates='co2 pft')
+    call RegisterVarAtts(ncid, 'gs_byco2', (/dimIDs(2)/), type_double,       &
+      'umol H2O m-2 s-1', 'stomatal conductance vs. CO2', gsbyco2ID,                    &
+      coordinates='co2 pft')
+    call RegisterVarAtts(ncid, 'ci_byco2', (/dimIDs(2)/), type_double, 'Pa', &
+      'intracellular CO2 vs. CO2', cibyco2ID, coordinates='co2 pft')
 
-    call RegisterVar(ncid, 'agross_byvpd', (/dimIDs(3), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'vpd pft', 'umolC m-2 s-1', 'gross photosynthesis vs. VPD'], 3, agrossbyvpdID)
-    call RegisterVar(ncid, 'anet_byvpd', (/dimIDs(3), dimIDs(6)/), type_double,   &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'vpd pft', 'umolC m-2 s-1', 'net photosynthesis vs. VPD'], 3, anetbyvpdID)
-    call RegisterVar(ncid, 'gs_byvpd', (/dimIDs(3), dimIDs(6)/), type_double,     &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'vpd pft', 'umol H2O m-2 s-1', 'stomatal conductance vs. VPD'], 3, gsbyvpdID)
-    call RegisterVar(ncid, 'ci_byvpd', (/dimIDs(3), dimIDs(6)/), type_double,     &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'vpd pft', 'Pa', 'intracellular CO2 vs. VPD'], 3, cibyvpdID)
+    call RegisterVarAtts(ncid, 'agross_byvpd', (/dimIDs(3)/), type_double,   &
+      'umolC m-2 s-1', 'gross photosynthesis vs. VPD', agrossbyvpdID,                   &
+      coordinates='vpd pft')
+    call RegisterVarAtts(ncid, 'anet_byvpd', (/dimIDs(3)/), type_double,     &
+      'umolC m-2 s-1', 'net photosynthesis vs. VPD', anetbyvpdID, coordinates='vpd pft')
+    call RegisterVarAtts(ncid, 'gs_byvpd', (/dimIDs(3)/), type_double,       &
+      'umol H2O m-2 s-1', 'stomatal conductance vs. VPD', gsbyvpdID,                    &
+      coordinates='vpd pft')
+    call RegisterVarAtts(ncid, 'ci_byvpd', (/dimIDs(3)/), type_double, 'Pa', &
+      'intracellular CO2 vs. VPD', cibyvpdID, coordinates='vpd pft')
 
-    call RegisterVar(ncid, 'agross_bytemp', (/dimIDs(4), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'temperature pft', 'umolC m-2 s-1', 'gross photosynthesis vs. leaf temperature'], 3, agrossbytempID)
-    call RegisterVar(ncid, 'anet_bytemp', (/dimIDs(4), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'temperature pft', 'umolC m-2 s-1', 'net photosynthesis vs. leaf temperature'], 3, anetbytempID)
-    call RegisterVar(ncid, 'gs_bytemp', (/dimIDs(4), dimIDs(6)/), type_double,   &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'temperature pft', 'umol H2O m-2 s-1', 'stomatal conductance vs. leaf temperature'], 3, gsbytempID)
-    call RegisterVar(ncid, 'ci_bytemp', (/dimIDs(4), dimIDs(6)/), type_double,   &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'temperature pft', 'Pa', 'intracellular CO2 vs. leaf temperature'], 3, cibytempID)
+    call RegisterVarAtts(ncid, 'agross_bytemp', (/dimIDs(4)/), type_double,  &
+      'umolC m-2 s-1', 'gross photosynthesis vs. leaf temperature', agrossbytempID,     &
+      coordinates='temperature pft')
+    call RegisterVarAtts(ncid, 'anet_bytemp', (/dimIDs(4)/), type_double,    &
+      'umolC m-2 s-1', 'net photosynthesis vs. leaf temperature', anetbytempID,         &
+      coordinates='temperature pft')
+    call RegisterVarAtts(ncid, 'gs_bytemp', (/dimIDs(4)/), type_double,      &
+      'umol H2O m-2 s-1', 'stomatal conductance vs. leaf temperature', gsbytempID,      &
+      coordinates='temperature pft')
+    call RegisterVarAtts(ncid, 'ci_bytemp', (/dimIDs(4)/), type_double,      &
+      'Pa', 'intracellular CO2 vs. leaf temperature', cibytempID,                       &
+      coordinates='temperature pft')
 
-    call RegisterVar(ncid, 'agross_bysoilfrac', (/dimIDs(5), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'soilfrac pft', 'umolC m-2 s-1', 'gross photosynthesis vs. soil water content'], 3, agrossbysoilfracID)
-    call RegisterVar(ncid, 'anet_bysoilfrac', (/dimIDs(5), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'soilfrac pft', 'umolC m-2 s-1', 'net photosynthesis vs. soil water content'], 3, anetbysoilfracID)
-    call RegisterVar(ncid, 'gs_bysoilfrac', (/dimIDs(5), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'soilfrac pft', 'umol H2O m-2 s-1', 'stomatal conductance vs. soil water content'], 3, gsbysoilfracID)
-    call RegisterVar(ncid, 'ci_bysoilfrac', (/dimIDs(5), dimIDs(6)/), type_double, &
-      [character(len=20) :: 'coordinates', 'units', 'long_name'],                &
-      [character(len=150) :: 'soilfrac pft', 'Pa', 'intracellular CO2 vs. soil water content'], 3, cibysoilfracID)
+    call RegisterVarAtts(ncid, 'agross_bysoilfrac', (/dimIDs(5)/),           &
+      type_double, 'umolC m-2 s-1', 'gross photosynthesis vs. soil water content',      &
+      agrossbysoilfracID, coordinates='soilfrac pft')
+    call RegisterVarAtts(ncid, 'anet_bysoilfrac', (/dimIDs(5)/),             &
+      type_double, 'umolC m-2 s-1', 'net photosynthesis vs. soil water content',        &
+      anetbysoilfracID, coordinates='soilfrac pft')
+    call RegisterVarAtts(ncid, 'gs_bysoilfrac', (/dimIDs(5)/), type_double,  &
+      'umol H2O m-2 s-1', 'stomatal conductance vs. soil water content',                &
+      gsbysoilfracID, coordinates='soilfrac pft')
+    call RegisterVarAtts(ncid, 'ci_bysoilfrac', (/dimIDs(5)/), type_double,  &
+      'Pa', 'intracellular CO2 vs. soil water content', cibysoilfracID,                 &
+      coordinates='soilfrac pft')
 
     call EndNCDef(ncid)
 
@@ -422,7 +381,6 @@ contains
     call WriteVar(ncid, vpdID, vpd_vals(:))
     call WriteVar(ncid, tempID, temp_vals(:))
     call WriteVar(ncid, soilfracID, soilfrac_vals(:))
-    call WriteVar(ncid, pftID, pft_indices(:))
 
     call WriteVar(ncid, vegesatbytempID, veg_esat_bytemp(:))
     call WriteVar(ncid, canvpressbytempID, can_vpress_bytemp(:))
@@ -430,30 +388,30 @@ contains
     call WriteVar(ncid, canvpressbyvpdID, can_vpress_byvpd(:))
     call WriteVar(ncid, btranbysoilfracID, btran_bysoilfrac(:))
 
-    call WriteVar(ncid, agrossbyparID, agross_bypar(:,:))
-    call WriteVar(ncid, anetbyparID, anet_bypar(:,:))
-    call WriteVar(ncid, gsbyparID, gs_bypar(:,:))
-    call WriteVar(ncid, cibyparID, ci_bypar(:,:))
+    call WriteVar(ncid, agrossbyparID, agross_bypar(:))
+    call WriteVar(ncid, anetbyparID, anet_bypar(:))
+    call WriteVar(ncid, gsbyparID, gs_bypar(:))
+    call WriteVar(ncid, cibyparID, ci_bypar(:))
 
-    call WriteVar(ncid, agrossbyco2ID, agross_byco2(:,:))
-    call WriteVar(ncid, anetbyco2ID, anet_byco2(:,:))
-    call WriteVar(ncid, gsbyco2ID, gs_byco2(:,:))
-    call WriteVar(ncid, cibyco2ID, ci_byco2(:,:))
+    call WriteVar(ncid, agrossbyco2ID, agross_byco2(:))
+    call WriteVar(ncid, anetbyco2ID, anet_byco2(:))
+    call WriteVar(ncid, gsbyco2ID, gs_byco2(:))
+    call WriteVar(ncid, cibyco2ID, ci_byco2(:))
 
-    call WriteVar(ncid, agrossbyvpdID, agross_byvpd(:,:))
-    call WriteVar(ncid, anetbyvpdID, anet_byvpd(:,:))
-    call WriteVar(ncid, gsbyvpdID, gs_byvpd(:,:))
-    call WriteVar(ncid, cibyvpdID, ci_byvpd(:,:))
+    call WriteVar(ncid, agrossbyvpdID, agross_byvpd(:))
+    call WriteVar(ncid, anetbyvpdID, anet_byvpd(:))
+    call WriteVar(ncid, gsbyvpdID, gs_byvpd(:))
+    call WriteVar(ncid, cibyvpdID, ci_byvpd(:))
 
-    call WriteVar(ncid, agrossbytempID, agross_bytemp(:,:))
-    call WriteVar(ncid, anetbytempID, anet_bytemp(:,:))
-    call WriteVar(ncid, gsbytempID, gs_bytemp(:,:))
-    call WriteVar(ncid, cibytempID, ci_bytemp(:,:))
+    call WriteVar(ncid, agrossbytempID, agross_bytemp(:))
+    call WriteVar(ncid, anetbytempID, anet_bytemp(:))
+    call WriteVar(ncid, gsbytempID, gs_bytemp(:))
+    call WriteVar(ncid, cibytempID, ci_bytemp(:))
 
-    call WriteVar(ncid, agrossbysoilfracID, agross_bysoilfrac(:,:))
-    call WriteVar(ncid, anetbysoilfracID, anet_bysoilfrac(:,:))
-    call WriteVar(ncid, gsbysoilfracID, gs_bysoilfrac(:,:))
-    call WriteVar(ncid, cibysoilfracID, ci_bysoilfrac(:,:))
+    call WriteVar(ncid, agrossbysoilfracID, agross_bysoilfrac(:))
+    call WriteVar(ncid, anetbysoilfracID, anet_bysoilfrac(:))
+    call WriteVar(ncid, gsbysoilfracID, gs_bysoilfrac(:))
+    call WriteVar(ncid, cibysoilfracID, ci_bysoilfrac(:))
 
     call CloseNCFile(ncid)
 

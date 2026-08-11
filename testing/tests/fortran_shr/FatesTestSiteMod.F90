@@ -1,15 +1,19 @@
 module FatesTestSiteMod
   !
   ! DESCRIPTION:
-  ! Prescribed site characteristics for running synthetic environmental conditions
+  ! Prescribed site characteristics for running synthetic climate conditions
   !
-  ! Defaults below are for BCI, Panama (9.153N, 280.154E):
-  ! temperature terms are fit to 2003-2016 hourly TBOT from that BCI DATM set (see
-  ! FatesTestEnvironmentMod's header for the fitting method), and
-  ! relative_humidity is a simple fixed assumption, not fit to data.
+  ! Defaults below are for BCI, Panama (9.153N, 280.154E): temperature fit to 2003-2016 
+  ! hourly TBOT from that BCI DATM set (see below).
   !
-  ! ReadSiteNamelist reads a &fates_test_site namelist group and overwrites whichever of 
-  ! these variables it lists, leaving any variable the namelist file omits at its BCI default 
+  ! The temperature terms were fit by least squares to the hourly BCI DATM record. 
+  ! All *_peak_hour values are in LOCAL SOLAR time,
+  ! the same convention FatesTestLightEnvMod's hour angle uses (its
+  ! (pi/12)*(hour_of_day - 12) puts solar noon at hour 12.0), so that a driver
+  ! passing one hour_of_day to both modules is passing the same clock to each.
+  !
+  ! ReadSiteNamelist reads a &fates_test_site namelist group and overwrites whichever of
+  ! these variables it lists, leaving any variable not on the namelist at default
   !
 
   use FatesConstantsMod, only : r8 => fates_r8
@@ -21,13 +25,14 @@ module FatesTestSiteMod
   ! ------------------------------------------------------------------------------------
   ! SITE DATA - defaults are for BCI, Panama; override via ReadSiteNamelist
   ! ------------------------------------------------------------------------------------
-  real(r8), public :: latitude_deg        = 9.15_r8     ! site latitude, drives the annual solar cycle [deg N]
-  real(r8), public :: t_annual_mean       = 299.1172_r8 ! annual-mean temperature [K]
-  real(r8), public :: t_annual_amp        = 0.6527_r8   ! amplitude of the annual temperature cycle [K]
-  real(r8), public :: t_annual_peak_doy   = 120.555_r8  ! day of year of the annual temperature peak [1-365]
-  real(r8), public :: t_diurnal_amp       = 2.2547_r8   ! amplitude of the diurnal temperature cycle [K]
-  real(r8), public :: t_diurnal_peak_hour = 13.450_r8   ! local solar hour of the diurnal temperature peak [0-24]
-  real(r8), public :: relative_humidity   = 0.80_r8     ! canopy air RH, held fixed [0-1]
+  real(r8), public :: latitude_deg         = 9.15_r8     ! site latitude, drives the annual solar cycle [deg N]
+  real(r8), public :: t_annual_mean        = 299.1172_r8 ! annual-mean temperature [K]
+  real(r8), public :: t_annual_amp         = 0.6527_r8   ! amplitude of the annual temperature cycle [K]
+  real(r8), public :: t_annual_peak_doy    = 120.555_r8  ! day of year of the annual temperature peak [1-365]
+  real(r8), public :: t_diurnal_amp        = 2.2710_r8   ! amplitude of the diurnal temperature cycle's fundamental [K]
+  real(r8), public :: t_diurnal_peak_hour  = 13.7432_r8  ! local solar hour of the diurnal temperature fundamental's peak [0-24]
+  real(r8), public :: t_diurnal2_amp       = 0.9579_r8   ! amplitude of the diurnal cycle's first overtone, which carries its asymmetry [K]
+  real(r8), public :: t_diurnal2_peak_hour = 0.7092_r8   ! local solar hour of the overtone's first daily peak [0-12, it has a 12 h period]
 
   public :: ReadSiteNamelist
 
@@ -51,7 +56,8 @@ contains
     integer :: ios     ! iostat return value
 
     namelist /fates_test_site/ latitude_deg, t_annual_mean, t_annual_amp,      &
-      t_annual_peak_doy, t_diurnal_amp, t_diurnal_peak_hour, relative_humidity
+      t_annual_peak_doy, t_diurnal_amp, t_diurnal_peak_hour, t_diurnal2_amp,   &
+      t_diurnal2_peak_hour
 
     open(newunit=unit_nl, file=trim(nl_filename), status='old', action='read', &
       iostat=ios)

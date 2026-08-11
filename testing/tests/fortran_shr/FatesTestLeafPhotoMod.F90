@@ -1,65 +1,32 @@
 module FatesTestLeafPhotoMod
   !
   ! DESCRIPTION:
-  ! Stateless leaf-level photosynthesis evaluator for standalone test drivers -
-  ! wraps the current production call sequence (GetCanopyGasParameters ->
-  ! LeafLayerBiophysicalRates -> LeafLayerMaintenanceRespiration_Ryan_1991 ->
-  ! LeafLayerPhotosynthesis) so a test can evaluate leaf gas exchange at any
-  ! prescribed, arbitrary driver conditions. Every argument to
-  ! EvaluateLeafPhotosynthesis below is recomputed from scratch on every call,
-  ! since a leaf-level sensitivity sweep needs to vary things (temperature,
-  ! nscaler, btran) that cohort_phys_type's GrossAssimAndResp/LeafNetAssimSweep
-  ! hold fixed at whatever a cohort's daily setup already left them.
-  !
-  ! FatesTestCohortPhysMod's SubdailyStep also uses this call sequence, once
-  ! per leaf layer per sunlit/shaded category - it calls
-  ! EvaluateLeafPhotosynthesis too rather than reimplementing the sequence,
-  ! passing the cohort's own (possibly acclimated) vcmax25top/jmax25top/
-  ! kp25top instead of the flat PFT defaults test_LeafLevelPhoto.F90 passes,
-  ! and reading back the optional vcmax/jmax/kp/gs0/gs1/gs2/lmr outputs so it
-  ! can cache them for GrossAssimAndResp/LeafNetAssimSweep to reuse "frozen"
-  ! later - those two evaluate LeafLayerPhotosynthesis directly at that cached
-  ! capacity, with no BiophysicalRates/MaintenanceRespiration recompute, so
-  ! they are a narrower operation this module does not wrap.
-  !
-  ! That capacity half of the sequence (LeafLayerBiophysicalRates ->
-  ! LeafLayerMaintenanceRespiration_Ryan_1991) is available on its own as
-  ! LeafLayerCapacity, returning a leaf_capacity_type - EvaluateLeafPhotosynthesis
-  ! is itself written as LeafLayerCapacity followed by LeafLayerPhotosynthesis, so
-  ! there is one implementation of that chain rather than one per caller. A caller
-  ! evaluating the same leaf layer more than once at a single capacity (sunlit and
-  ! shaded, or a diagnostic sweep across incident PPFD) can hold the
-  ! leaf_capacity_type and drive LeafLayerPhotosynthesis directly, which is what
-  ! makes the "frozen capacity" distinction visible at the call site instead of
-  ! implied by which routine was called.
+  ! Helper methods for running leaf-level photosynthesis
   !
 
-  use FatesConstantsMod, only : r8 => fates_r8
-  use FatesConstantsMod, only : nearzero
-  use FatesConstantsMod, only : wm2_to_umolm2s
-  use LeafBiophysicsMod, only : GetCanopyGasParameters
-  use LeafBiophysicsMod, only : LeafLayerBiophysicalRates
-  use LeafBiophysicsMod, only : LeafLayerMaintenanceRespiration_Ryan_1991
-  use LeafBiophysicsMod, only : LeafLayerPhotosynthesis
-  use LeafBiophysicsMod, only : DecayCoeffVcmax
-  use FatesAllometryMod, only : VegAreaLayer
-  use PRTParametersMod,  only : prt_params
-  use PRTGenericMod,     only : leaf_organ
+  use FatesConstantsMod,      only : r8 => fates_r8
+  use FatesConstantsMod,      only : nearzero
+  use FatesConstantsMod,      only : wm2_to_umolm2s
+  use FatesInterfaceTypesMod, only : hlm_maintresp_leaf_model
+  use FatesConstantsMod,      only : lmrmodel_ryan_1991
+  use FatesConstantsMod,      only : lmrmodel_atkin_etal_2017
+  use LeafBiophysicsMod,      only : GetCanopyGasParameters
+  use LeafBiophysicsMod,      only : LeafLayerBiophysicalRates
+  use LeafBiophysicsMod,      only : LeafLayerMaintenanceRespiration_Ryan_1991
+  use LeafBiophysicsMod,      only : LeafLayerPhotosynthesis
+  use LeafBiophysicsMod,      only : DecayCoeffVcmax
+  use FatesAllometryMod,      only : VegAreaLayer
+  use PRTParametersMod,       only : prt_params
+  use PRTGenericMod,          only : leaf_organ
+
 
   implicit none
   private
 
-  ! convergence tolerance for intracellular CO2 [Pa] - matches production's
-  ! own use. Public so FatesTestCohortPhysMod's GrossAssimAndResp/
-  ! LeafNetAssimSweep (which call LeafLayerPhotosynthesis directly, at
-  ! already-cached capacity, rather than through EvaluateLeafPhotosynthesis)
-  ! can share this same value instead of redeclaring it.
+  ! convergence tolerance for intracellular CO2 [Pa]
   real(r8), public, parameter :: ci_tol = 0.5_r8
 
-  ! minimum leaf area to bother solving photosynthesis for [m2] - matches
-  ! ConvertPar in FatesPlantRespPhotosynthMod. Public so every caller
-  ! converting a per-ground-area absorbed PAR to a per-leaf-area PPFD shares
-  ! one threshold rather than redeclaring or guessing it.
+  ! minimum leaf area to bother solving photosynthesis for [m2]
   real(r8), public, parameter :: min_la_to_solve = 1.0e-10_r8
 
   ! ------------------------------------------------------------------------------------
@@ -73,18 +40,14 @@ module FatesTestLeafPhotoMod
   ! conditions on every evaluation (via LeafLayerCapacity), and those deliberately
   ! reusing a previously computed ("frozen") capacity so that a diagnostic sweep
   ! advances no state (FatesTestCohortPhysMod's GrossAssimAndResp/LeafNetAssimSweep).
-  !
-  ! The gs0/gs1/gs2 comments follow LeafBiophysicsMod's own wording for the
-  ! corresponding LeafLayerBiophysicalRates outputs. Production states units for gs0
-  ! and gs2 but leaves gs1 dimensionally undocumented, so none is invented for it here
   ! ------------------------------------------------------------------------------------
   type, public :: leaf_capacity_type
      real(r8) :: vcmax ! maximum rate of carboxylation [umolCO2/m2 leaf/s]
      real(r8) :: jmax  ! maximum electron transport rate [umol electrons/m2 leaf/s]
      real(r8) :: kp    ! initial slope of the CO2 response curve, C4 plants [umol/m2 leaf/s]
      real(r8) :: gs0   ! effective stomatal conductance intercept [umol H2O/m2 leaf/s]
-     real(r8) :: gs1   ! effective stomatal conductance slope, possibly multiplied by btran (units not stated in LeafBiophysicsMod)
-     real(r8) :: gs2   ! alternative btran term applied to the whole non-intercept side of the Medlyn conductance equation - either 1 or btran [-]
+     real(r8) :: gs1   ! effective stomatal conductance slope
+     real(r8) :: gs2   ! alternative btran term applied to the whole non-intercept side of the Medlyn conductance equation
      real(r8) :: lmr   ! leaf maintenance (dark) respiration [umolCO2/m2 leaf/s]
   end type leaf_capacity_type
 
@@ -98,6 +61,118 @@ module FatesTestLeafPhotoMod
 
 contains
 
+  ! ==========================================================================
+  
+  function LeafNitrogenContent(pft) result(lnc_top)
+    !
+    ! DESCRIPTION:
+    ! Leaf nitrogen content at the canopy top [gN/m2 leaf], needed by
+    ! LeafLayerMaintenanceRespiration_Ryan_1991. Requires PRTDerivedParams() to have 
+    ! already populated prt_params%organ_param_id 
+
+    ! ARGUMENTS:
+    integer, intent(in) :: pft ! plant functional type index
+
+    ! LOCALS:
+    real(r8) :: lnc_top ! leaf N content at the canopy top [gN/m2 leaf]
+
+    lnc_top = prt_params%nitr_stoich_p1(pft, prt_params%organ_param_id(leaf_organ)) / &
+      prt_params%slatop(pft)
+
+  end function LeafNitrogenContent
+
+  ! ==========================================================================
+  
+  subroutine EvaluateLeafPhotosynthesis(pft, par_abs, veg_tempk, t_growth, t_home, &
+    can_press, can_co2_ppress, can_o2_ppress, veg_esat, can_vpress, gb, nscaler,   &
+    dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, agross, anet, gs, ci)
+    !
+    ! DESCRIPTION:
+    ! Evaluates leaf-level photosynthesis at arbitrary prescribed driver
+    ! conditions. This reproduces the full current production call sequence:
+    !
+    !   GetCanopyGasParameters -> LeafLayerBiophysicalRates ->
+    !   LeafLayerMaintenanceRespiration_Ryan_1991 -> LeafLayerPhotosynthesis
+    !
+    ! lb_params' model switches (electron_transport_model, stomatal_model,
+    ! stomatal_assim_model, photo_tempsens_model) are HLM-namelist-controlled
+    ! in production and so are not set by any call in this module. The
+    ! calling driver must set them explicitly
+  
+    ! ARGUMENTS:
+    integer,  intent(in)  :: pft            ! plant functional type index
+    real(r8), intent(in)  :: par_abs        ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
+    real(r8), intent(in)  :: veg_tempk      ! instantaneous leaf temperature [K]
+    real(r8), intent(in)  :: t_growth       ! 10-day running-mean growth temperature [K]
+    real(r8), intent(in)  :: t_home         ! long-term running-mean home temperature [K]
+    real(r8), intent(in)  :: can_press      ! air pressure at the leaf surface [Pa]
+    real(r8), intent(in)  :: can_co2_ppress ! CO2 partial pressure at the leaf surface [Pa]
+    real(r8), intent(in)  :: can_o2_ppress  ! O2 partial pressure at the leaf surface [Pa]
+    real(r8), intent(in)  :: veg_esat       ! saturation vapor pressure at veg_tempk [Pa]
+    real(r8), intent(in)  :: can_vpress     ! vapor pressure of the canopy air [Pa]
+    real(r8), intent(in)  :: gb             ! leaf boundary layer conductance [umol/m2/s]
+    real(r8), intent(in)  :: nscaler        ! leaf nitrogen vertical-scaling factor [0-1]
+    real(r8), intent(in)  :: dayl_factor    ! day-length photosynthetic-capacity acclimation factor [0-1]
+    real(r8), intent(in)  :: btran          ! soil moisture stress factor [0-1]
+    real(r8), intent(in)  :: vcmax25top     ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
+    real(r8), intent(in)  :: jmax25top      ! reference (25C, canopy-top) maximum electron transport rate [umol/m2/s]
+    real(r8), intent(in)  :: kp25top        ! reference (25C, canopy-top) initial slope of C4 CO2 response [umol/m2/s]
+    real(r8), intent(in)  :: lnc_top        ! leaf N content at the canopy top [gN/m2 leaf] (see LeafNitrogenContent)
+    real(r8), intent(out) :: agross         ! gross photosynthesis [umolC/m2/s]
+    real(r8), intent(out) :: anet           ! net photosynthesis [umolC/m2/s]
+    real(r8), intent(out) :: gs             ! leaf stomatal conductance [umol H2O/m2/s]
+    real(r8), intent(out) :: ci             ! intracellular CO2 [Pa]
+
+    ! LOCALS:
+    real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point [Pa]
+    type(leaf_capacity_type) :: cap         ! leaf biophysical capacity/dark respiration at these conditions
+    real(r8) :: c13disc                     ! carbon-13 discrimination (unused diagnostic here)
+    integer  :: solve_iter                  ! Ci-solver iteration count (unused diagnostic here)
+
+    call GetCanopyGasParameters(can_press, can_o2_ppress, veg_tempk, mm_kco2, mm_ko2, co2_cpoint)
+
+    call LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler, dayl_factor, &
+      btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
+
+    call LeafLayerPhotosynthesis(par_abs, pft, cap%vcmax, cap%jmax, cap%kp,       &
+      cap%gs0, cap%gs1, cap%gs2, veg_tempk, can_press, can_co2_ppress,            &
+      can_o2_ppress, veg_esat, gb, can_vpress, mm_kco2, mm_ko2, co2_cpoint,       &
+      cap%lmr, ci_tol, agross, gs, anet, c13disc, ci, solve_iter)
+      
+  end subroutine EvaluateLeafPhotosynthesis
+  
+  ! ==========================================================================
+
+  subroutine LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler,         &
+    dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
+    !
+    ! DESCRIPTION:
+    ! One leaf layer's photosynthetic capacity and dark respiration at the given
+    ! leaf conditions
+    !
+
+    ! ARGUMENTS:
+    integer,  intent(in)  :: pft                 ! plant functional type index
+    real(r8), intent(in)  :: veg_tempk           ! instantaneous leaf temperature [K]
+    real(r8), intent(in)  :: t_growth            ! 10-day running-mean growth temperature [K]
+    real(r8), intent(in)  :: t_home              ! long-term running-mean home temperature [K]
+    real(r8), intent(in)  :: nscaler             ! leaf nitrogen vertical-scaling factor [0-1]
+    real(r8), intent(in)  :: dayl_factor         ! day-length photosynthetic-capacity acclimation factor [0-1]
+    real(r8), intent(in)  :: btran               ! soil moisture stress factor [0-1]
+    real(r8), intent(in)  :: vcmax25top          ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
+    real(r8), intent(in)  :: jmax25top           ! reference (25C, canopy-top) maximum electron transport rate [umol/m2/s]
+    real(r8), intent(in)  :: kp25top             ! reference (25C, canopy-top) initial slope of C4 CO2 response [umol/m2/s]
+    real(r8), intent(in)  :: lnc_top             ! leaf N content at the canopy top [gN/m2 leaf] (see LeafNitrogenContent)
+    type(leaf_capacity_type), intent(out) :: cap ! this layer's capacity/dark respiration at these conditions
+
+    call LeafLayerBiophysicalRates(pft, vcmax25top, jmax25top, kp25top, nscaler,   &
+      veg_tempk, dayl_factor, t_growth, t_home, btran, cap%vcmax, cap%jmax,       &
+      cap%kp, cap%gs0, cap%gs1, cap%gs2)
+      
+    call LeafLayerMaintenanceRespiration_Ryan_1991(lnc_top, nscaler, pft, veg_tempk, cap%lmr)
+    
+  end subroutine LeafLayerCapacity
+  
   ! ==========================================================================
 
   function LayerParPerLeafArea(par_z, lai_z) result(par_abs)
@@ -213,77 +288,6 @@ contains
 
   ! ==========================================================================
 
-  function LeafNitrogenContent(pft) result(lnc_top)
-    !
-    ! DESCRIPTION:
-    ! Leaf nitrogen content at the canopy top [gN/m2 leaf], needed by
-    ! LeafLayerMaintenanceRespiration_Ryan_1991. Shared by
-    ! test_LeafLevelPhoto.F90 and test_SingleCohort.F90 for their own
-    ! lnc_top. Requires PRTDerivedParams() to have already populated
-    ! prt_params%organ_param_id (see test_LeafLevelPhoto.F90's setup
-    ! sequence)
-
-    ! ARGUMENTS:
-    integer, intent(in) :: pft ! plant functional type index
-
-    ! LOCALS:
-    real(r8) :: lnc_top ! leaf N content at the canopy top [gN/m2 leaf]
-
-    lnc_top = prt_params%nitr_stoich_p1(pft, prt_params%organ_param_id(leaf_organ)) / &
-      prt_params%slatop(pft)
-
-  end function LeafNitrogenContent
-
-  ! ==========================================================================
-
-  subroutine LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler,         &
-    dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
-    !
-    ! DESCRIPTION:
-    ! One leaf layer's photosynthetic capacity and dark respiration at the given
-    ! leaf conditions - the LeafLayerBiophysicalRates ->
-    ! LeafLayerMaintenanceRespiration_Ryan_1991 half of the production call
-    ! sequence EvaluateLeafPhotosynthesis wraps. That routine is written in terms
-    ! of this one (it calls this, then LeafLayerPhotosynthesis), so this is the
-    ! single implementation of that chain rather than a parallel copy of it.
-    !
-    ! Separated out so a caller evaluating the same leaf layer more than once at
-    ! one capacity - sunlit and shaded, or a diagnostic sweep across incident PPFD
-    ! - can compute capacity once and hold it. Both routines called here are
-    ! closed-form Arrhenius-type evaluations rather than solves, so this exists to
-    ! let the frozen-capacity callers say so structurally (see
-    ! leaf_capacity_type's comment), not to save their cost.
-    !
-    ! Requires ReadParameters, InitializeGlobals and PRTDerivedParams to have
-    ! already been called, and lb_params' model switches to have been set by the
-    ! calling driver - see EvaluateLeafPhotosynthesis's header comment for both
-    ! dependencies.
-
-    ! ARGUMENTS:
-    integer,  intent(in)  :: pft         ! plant functional type index
-    real(r8), intent(in)  :: veg_tempk   ! instantaneous leaf temperature [K]
-    real(r8), intent(in)  :: t_growth    ! 10-day running-mean growth temperature [K]
-    real(r8), intent(in)  :: t_home      ! long-term running-mean home temperature [K]
-    real(r8), intent(in)  :: nscaler     ! leaf nitrogen vertical-scaling factor [0-1]
-    real(r8), intent(in)  :: dayl_factor ! day-length photosynthetic-capacity acclimation factor [0-1]
-    real(r8), intent(in)  :: btran       ! soil moisture stress factor [0-1]
-    real(r8), intent(in)  :: vcmax25top  ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
-    real(r8), intent(in)  :: jmax25top   ! reference (25C, canopy-top) maximum electron transport rate [umol/m2/s]
-    real(r8), intent(in)  :: kp25top     ! reference (25C, canopy-top) initial slope of C4 CO2 response [umol/m2/s]
-    real(r8), intent(in)  :: lnc_top     ! leaf N content at the canopy top [gN/m2 leaf] (see LeafNitrogenContent)
-    type(leaf_capacity_type), intent(out) :: cap ! this layer's capacity/dark respiration at these conditions
-
-    call LeafLayerBiophysicalRates(pft, vcmax25top, jmax25top, kp25top, nscaler,   &
-      veg_tempk, dayl_factor, t_growth, t_home, btran, cap%vcmax, cap%jmax,       &
-      cap%kp, cap%gs0, cap%gs1, cap%gs2)
-
-    call LeafLayerMaintenanceRespiration_Ryan_1991(lnc_top, nscaler, pft,          &
-      veg_tempk, cap%lmr)
-
-  end subroutine LeafLayerCapacity
-
-  ! ==========================================================================
-
   subroutine LeafLayerSunShade(pft, cap, par_sun_z, par_sha_z, lai_sun_z,        &
     lai_sha_z, veg_tempk, can_press, can_co2_ppress, can_o2_ppress, veg_esat,    &
     can_vpress, gb, mm_kco2, mm_ko2, co2_cpoint, agross_layer, anet_layer,       &
@@ -384,125 +388,5 @@ contains
   end subroutine LeafLayerSunShade
 
   ! ==========================================================================
-
-  subroutine EvaluateLeafPhotosynthesis(pft, par_abs, veg_tempk, t_growth, t_home, &
-    can_press, can_co2_ppress, can_o2_ppress, veg_esat, can_vpress, gb, nscaler,   &
-    dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, agross, anet, gs, ci, &
-    vcmax, jmax, kp, gs0, gs1, gs2, lmr, solve_iter_out)
-    !
-    ! DESCRIPTION:
-    ! Evaluates leaf-level photosynthesis at arbitrary prescribed driver
-    ! conditions - the full current production call sequence
-    ! (GetCanopyGasParameters -> LeafLayerBiophysicalRates ->
-    ! LeafLayerMaintenanceRespiration_Ryan_1991 -> LeafLayerPhotosynthesis, the
-    ! middle two reached via LeafLayerCapacity above),
-    ! with no self-shading and no canopy structure: every argument is a
-    ! single instantaneous scalar, and every biophysical rate is recomputed
-    ! from these arguments alone on every call, with nothing cached between
-    ! calls (see FatesTestCohortPhysMod.F90's SubdailyStep, which calls this
-    ! twice per leaf layer - once sunlit, once shaded - and so recomputes
-    ! GetCanopyGasParameters redundantly within a single substep; that is
-    ! deliberate, not an oversight - it is a closed-form Arrhenius-type
-    ! evaluation, not a solve, so the redundant calls are negligible next to
-    ! LeafLayerPhotosynthesis's own Ci iteration).
-    !
-    ! vcmax25top/jmax25top/kp25top are the caller's choice of reference
-    ! (25C, canopy-top) photosynthetic capacity - test_LeafLevelPhoto.F90
-    ! passes the flat PFT default (EDPftvarcon_inst%vcmax25top(pft,1),
-    ! param_derived%jmax25top/kp25top(pft,1)), while FatesTestCohortPhysMod's
-    ! SubdailyStep passes a cohort's own, possibly N/light-acclimated,
-    ! cohort%vcmax25top/jmax25top/kp25top.
-    !
-    ! vcmax/jmax/kp/gs0/gs1/gs2/lmr are optional outputs of the intermediate
-    ! LeafLayerBiophysicalRates/LeafLayerMaintenanceRespiration_Ryan_1991
-    ! results - test_LeafLevelPhoto.F90 has no use for them and leaves them
-    ! absent, while SubdailyStep reads them back to cache as this leaf
-    ! layer's "frozen" capacity for GrossAssimAndResp/LeafNetAssimSweep to
-    ! reuse later. solve_iter is similarly optional, for SubdailyStep's own
-    ! Ci-solver diagnostic counters (n_bisection_calls/max_solve_iter/
-    ! sum_solve_iter) - test_LeafLevelPhoto.F90 has no use for it either.
-    !
-    ! Note this means LeafLayerBiophysicalRates and
-    ! LeafLayerMaintenanceRespiration_Ryan_1991 (both closed-form, not
-    ! iterative solves) run once per call here, so SubdailyStep calling this
-    ! twice per leaf layer (sunlit, then shaded) recomputes them twice per
-    ! layer where the original inlined version computed them once and reused
-    ! the result for both - deliberate, not an oversight, since the actual
-    ! Ci-solve inside LeafLayerPhotosynthesis (which still only runs once per
-    ! sunlit/shaded category either way) dominates the per-call cost.
-    !
-    ! Requires ReadParameters, InitializeGlobals, and PRTDerivedParams to have
-    ! already been called (see test_LeafLevelPhoto.F90's setup sequence, and
-    ! LeafNitrogenContent's header comment for the specific dependency on
-    ! PRTDerivedParams) - this evaluates production physics directly, with no
-    ! fallback defaults of its own for anything those calls populate.
-    !
-    ! lb_params' model switches (electron_transport_model, stomatal_model,
-    ! stomatal_assim_model, photo_tempsens_model) are HLM-namelist-controlled
-    ! in production and so are not set by any call in this module - the
-    ! calling driver must set them explicitly first (see
-    ! test_LeafLevelPhoto.F90's setup, which matches test_SingleCohort.F90's
-    ! choices for consistency across this test suite), or
-    ! LeafLayerBiophysicalRates' temperature-acclimation branch will hit its
-    ! unhandled case-default and abort the run.
-
-    ! ARGUMENTS:
-    integer,  intent(in)  :: pft             ! plant functional type index
-    real(r8), intent(in)  :: par_abs         ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
-    real(r8), intent(in)  :: veg_tempk       ! instantaneous leaf temperature [K]
-    real(r8), intent(in)  :: t_growth        ! 10-day running-mean growth temperature [K]
-    real(r8), intent(in)  :: t_home          ! long-term running-mean home temperature [K]
-    real(r8), intent(in)  :: can_press       ! air pressure at the leaf surface [Pa]
-    real(r8), intent(in)  :: can_co2_ppress  ! CO2 partial pressure at the leaf surface [Pa]
-    real(r8), intent(in)  :: can_o2_ppress   ! O2 partial pressure at the leaf surface [Pa]
-    real(r8), intent(in)  :: veg_esat        ! saturation vapor pressure at veg_tempk [Pa]
-    real(r8), intent(in)  :: can_vpress      ! vapor pressure of the canopy air [Pa]
-    real(r8), intent(in)  :: gb              ! leaf boundary layer conductance [umol/m2/s]
-    real(r8), intent(in)  :: nscaler         ! leaf nitrogen vertical-scaling factor [0-1]
-    real(r8), intent(in)  :: dayl_factor     ! day-length photosynthetic-capacity acclimation factor [0-1]
-    real(r8), intent(in)  :: btran           ! soil moisture stress factor [0-1]
-    real(r8), intent(in)  :: vcmax25top      ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
-    real(r8), intent(in)  :: jmax25top       ! reference (25C, canopy-top) maximum electron transport rate [umol/m2/s]
-    real(r8), intent(in)  :: kp25top         ! reference (25C, canopy-top) initial slope of C4 CO2 response [umol/m2/s]
-    real(r8), intent(in)  :: lnc_top         ! leaf N content at the canopy top [gN/m2 leaf] (see LeafNitrogenContent)
-    real(r8), intent(out) :: agross          ! gross photosynthesis [umolC/m2/s]
-    real(r8), intent(out) :: anet            ! net photosynthesis [umolC/m2/s]
-    real(r8), intent(out) :: gs              ! leaf stomatal conductance [umol H2O/m2/s]
-    real(r8), intent(out) :: ci              ! intracellular CO2 [Pa]
-    real(r8), intent(out), optional :: vcmax ! leaf biophysical capacity at these conditions, for callers that cache it (e.g. SubdailyStep)
-    real(r8), intent(out), optional :: jmax  ! leaf biophysical capacity at these conditions, for callers that cache it
-    real(r8), intent(out), optional :: kp    ! leaf biophysical capacity at these conditions, for callers that cache it
-    real(r8), intent(out), optional :: gs0   ! stomatal conductance slope/intercept term, for callers that cache it
-    real(r8), intent(out), optional :: gs1   ! stomatal conductance slope/intercept term, for callers that cache it
-    real(r8), intent(out), optional :: gs2   ! stomatal conductance slope/intercept term, for callers that cache it
-    real(r8), intent(out), optional :: lmr   ! leaf maintenance (dark) respiration [umolCO2/m2/s], for callers that cache it
-    integer,  intent(out), optional :: solve_iter_out ! Ci-solver iteration count, for callers tracking solver diagnostics (e.g. SubdailyStep)
-
-    ! LOCALS:
-    real(r8) :: mm_kco2, mm_ko2, co2_cpoint ! Michaelis-Menten constants for CO2/O2, CO2 compensation point [Pa]
-    type(leaf_capacity_type) :: cap         ! leaf biophysical capacity/dark respiration at these conditions
-    real(r8) :: c13disc                     ! carbon-13 discrimination (unused diagnostic here)
-    integer  :: solve_iter                  ! Ci-solver iteration count (unused diagnostic here)
-
-    call GetCanopyGasParameters(can_press, can_o2_ppress, veg_tempk, mm_kco2, mm_ko2, co2_cpoint)
-
-    call LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler, dayl_factor, &
-      btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
-
-    call LeafLayerPhotosynthesis(par_abs, pft, cap%vcmax, cap%jmax, cap%kp,        &
-      cap%gs0, cap%gs1, cap%gs2, veg_tempk, can_press, can_co2_ppress,            &
-      can_o2_ppress, veg_esat, gb, can_vpress, mm_kco2, mm_ko2, co2_cpoint,       &
-      cap%lmr, ci_tol, agross, gs, anet, c13disc, ci, solve_iter)
-
-    if (present(vcmax)) vcmax = cap%vcmax
-    if (present(jmax))  jmax  = cap%jmax
-    if (present(kp))    kp    = cap%kp
-    if (present(gs0))   gs0   = cap%gs0
-    if (present(gs1))   gs1   = cap%gs1
-    if (present(gs2))   gs2   = cap%gs2
-    if (present(lmr))   lmr   = cap%lmr
-    if (present(solve_iter_out)) solve_iter_out = solve_iter
-
-  end subroutine EvaluateLeafPhotosynthesis
 
 end module FatesTestLeafPhotoMod

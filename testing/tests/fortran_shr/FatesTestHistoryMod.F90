@@ -26,6 +26,23 @@ module FatesTestHistoryMod
   !     particular leaf-area or biomass normalization - see
   !     test_SingleCohort.F90's header comment for how LIE_LA/LIE_M/LUE are
   !     built from it in post-processing.
+  !   - The daily environmental forcing the trajectory was actually driven with
+  !     (daily/midday temperature, saturation vapor pressure and canopy vapor
+  !     pressure, the T_growth/T_home acclimation state, and a count of substeps
+  !     at which the vapor pressure had to be constrained), dimensioned (time)
+  !     alone. These are deliberately NOT on the light_level axis: the prescribed
+  !     forcing is a function of day and hour only (see FatesTestEnvironmentMod's
+  !     SetHour), so it is identical across light levels by construction and
+  !     carrying n_light identical copies would be misleading as well as
+  !     wasteful. They exist so that a finished run can be interpreted from its
+  !     output file alone - which humidity_mode was in effect, whether a site
+  !     swap pushed the vapor pressure against a bound - rather than by
+  !     re-deriving the climatology by hand from the namelist. Saturation vapor
+  !     pressure is carried alongside vapor pressure rather than a precomputed
+  !     VPD or RH so post-processing can form either exactly. Like the Ci-solver
+  !     summary below, these are kept regardless of reduced_output: one value per
+  !     day is negligible next to the (time, light_level) arrays, and knowing
+  !     what a draw was forced with is worth more in a large sweep, not less.
   !   - A per-leaf-layer light profile (parsun_z/parsha_z/laisun_z/laisha_z),
   !     dimensioned (nlevleaf, year, light_level), captured once per year. nlevleaf
   !     is a compile-time maximum leaf+stem layer count; layers above a given
@@ -73,8 +90,9 @@ module FatesTestHistoryMod
   use PRTGenericMod,      only : repro_organ
   use PRTGenericMod,      only : carbon12_element
   use FatesTestLightEnvMod, only : light_env_type
+  use FatesTestEnvironmentMod, only : environment_type
   use FatesUnitTestIOMod, only : OpenNCFile, RegisterNCDims, CloseNCFile
-  use FatesUnitTestIOMod, only : WriteVar, RegisterVar, RegisterFillValue, EndNCDef
+  use FatesUnitTestIOMod, only : WriteVar, RegisterVarAtts, RegisterFillValue, EndNCDef
   use FatesUnitTestIOMod, only : type_double, type_int
 
   implicit none
@@ -122,6 +140,18 @@ module FatesTestHistoryMod
      real(r8), allocatable :: light_intercept_eff(:,:)       ! light interception efficiency: whole-plant absorbed PAR / absorbed PAR of an equal-leaf-area, zero-self-shading reference surface, energy-weighted over the day (Sterck et al. 2013) [-]
      real(r8), allocatable :: maintresp_reduction_factor(:,:) ! storage-based maintenance-respiration throttle [0-1]
      real(r8), allocatable :: daily_absorbed_par_indiv(:,:)  ! whole-plant absorbed PAR per individual (Onoda et al. 2013's Phi), integrated over the day [J indiv-1 day-1]
+
+     ! daily environmental forcing, dimensioned (time) only - identical across
+     ! light levels by construction, see the module header comment
+     real(r8), allocatable :: daily_temp(:)         ! daily-mean vegetation temperature [K]
+     real(r8), allocatable :: daily_veg_esat(:)     ! daily-mean saturation vapor pressure [Pa]
+     real(r8), allocatable :: daily_can_vpress(:)   ! daily-mean canopy air vapor pressure [Pa]
+     real(r8), allocatable :: midday_temp(:)        ! vegetation temperature at the substep nearest solar noon [K]
+     real(r8), allocatable :: midday_veg_esat(:)    ! saturation vapor pressure at that substep [Pa]
+     real(r8), allocatable :: midday_can_vpress(:)  ! canopy air vapor pressure at that substep [Pa]
+     real(r8), allocatable :: t_growth(:)           ! 10-day running-mean growth temperature [K]
+     real(r8), allocatable :: t_home(:)             ! long-term running-mean home temperature [K]
+     integer,  allocatable :: n_vpress_constrained(:) ! substeps this day at which the requested vapor pressure hit a bound [-]
 
      ! whole-trajectory Ci-solver summary, dimensioned (light_level) - see
      ! RecordLightLevelSummary
@@ -206,6 +236,18 @@ contains
     allocate(this%mean_ci_solve_iter(n_light))
     allocate(this%n_bisection_fallbacks(n_light))
 
+    ! daily environmental forcing (time only) - always allocated, see the
+    ! module header comment
+    allocate(this%daily_temp(n_time))
+    allocate(this%daily_veg_esat(n_time))
+    allocate(this%daily_can_vpress(n_time))
+    allocate(this%midday_temp(n_time))
+    allocate(this%midday_veg_esat(n_time))
+    allocate(this%midday_can_vpress(n_time))
+    allocate(this%t_growth(n_time))
+    allocate(this%t_home(n_time))
+    allocate(this%n_vpress_constrained(n_time))
+
     ! everything else - skipped entirely in reduced_output mode
     if (.not. this%reduced_output) then
       allocate(this%height(n_time, n_light))
@@ -246,7 +288,7 @@ contains
     daily_rdark, daily_livestem_mr, daily_livecroot_mr, daily_froot_mr,        &
     daily_growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,            &
     struct_turnover, npp_acc, frac_store, cmort, light_intercept_eff,          &
-    maintresp_reduction_factor, daily_absorbed_par_indiv)
+    maintresp_reduction_factor, daily_absorbed_par_indiv, env)
     !
     ! DESCRIPTION:
     ! Capture one day's daily time series row. dbh/height/treelai/treesai/nv/
@@ -257,6 +299,14 @@ contains
     ! computed once) over the course of today's sub-daily loop/growth sequence
     ! in RunOneLightLevel/DailyGrowthAndMortality, not recoverable from cohort's
     ! instantaneous state alone.
+    !
+    ! The environmental forcing is read off env, whose daily diagnostics are
+    ! finalized by UpdateDailyMeans - so this must be called after it, which is
+    ! also where the daily flux terms above become complete. Those diagnostics
+    ! carry no light_level axis (the forcing is identical across light levels,
+    ! see the module header), so every light level simply writes the same row;
+    ! this is redundant rather than wrong, and keeps the caller from having to
+    ! special-case one light level.
 
     ! ARGUMENTS:
     class(history_type),     intent(inout) :: this        ! history object
@@ -280,6 +330,18 @@ contains
     real(r8),                 intent(in)    :: light_intercept_eff       ! light interception efficiency [-]
     real(r8),                 intent(in)    :: maintresp_reduction_factor ! storage-based maintenance-respiration throttle [0-1]
     real(r8),                 intent(in)    :: daily_absorbed_par_indiv  ! whole-plant absorbed PAR per individual (Onoda et al. 2013's Phi) [J indiv-1 day-1]
+    type(environment_type),  intent(in)    :: env         ! environment holding today's finalized forcing diagnostics
+
+    ! daily environmental forcing - always recorded (see the module header)
+    this%daily_temp(iday_all) = env%daily_temp
+    this%daily_veg_esat(iday_all) = env%daily_veg_esat
+    this%daily_can_vpress(iday_all) = env%daily_can_vpress
+    this%midday_temp(iday_all) = env%midday_temp
+    this%midday_veg_esat(iday_all) = env%midday_veg_esat
+    this%midday_can_vpress(iday_all) = env%midday_can_vpress
+    this%t_growth(iday_all) = env%t_growth
+    this%t_home(iday_all) = env%t_home
+    this%n_vpress_constrained(iday_all) = env%n_vpress_constrained
 
     ! shade-tolerance metric set - always recorded
     this%dbh(iday_all, ilight) = cohort%dbh
@@ -412,16 +474,17 @@ contains
   subroutine Write(this, out_file, light_frac, ppfd_values)
     !
     ! DESCRIPTION:
-    ! Writes out the daily whole-cohort time series (see RecordDay), the
-    ! instantaneous whole-plant/leaf-level light-response diagnostics
-    ! (gross_assim/total_resp/leaf_anet, dimensioned (ppfd, year, light_level)),
-    ! and the whole-trajectory Ci-solver summary (mean_ci_solve_iter/
-    ! n_bisection_fallbacks, dimensioned (light_level)) - these are the
-    ! shade-tolerance metric set (see the module header comment) and are always
-    ! registered/written. Everything else (the per-leaf-layer light profile,
+    ! Writes out the daily whole-cohort time series (see RecordDay), the daily
+    ! environmental forcing (dimensioned (time) alone), the instantaneous
+    ! whole-plant/leaf-level light-response diagnostics (gross_assim/total_resp/
+    ! leaf_anet, dimensioned (ppfd, year, light_level)), and the whole-trajectory
+    ! Ci-solver summary (mean_ci_solve_iter/n_bisection_fallbacks, dimensioned
+    ! (light_level)) - these are the shade-tolerance metric set plus the two
+    ! cheap always-on diagnostic groups (see the module header comment), and are
+    ! always registered/written. Everything else (the per-leaf-layer light profile,
     ! dimensioned (nlevleaf, year, light_level), and the remaining daily
     ! diagnostics) is registered/written only if this%reduced_output is false -
-    ! grouped into one block below, rather than guarding each RegisterVar/
+    ! grouped into one block below, rather than guarding each RegisterVarAtts/
     ! WriteVar call individually, since Fortran has no conditional variable
     ! declaration and the two groups are otherwise interleaved in a natural
     ! reading order.
@@ -445,6 +508,9 @@ contains
     integer               :: leafcID, fnrtcID, sapwcID, structcID, storagecID
     integer               :: nID, lightintercepteffID, dailyabsorbedparindivID
     integer               :: meancisolveiterID, nbisectionfallbacksID
+    integer               :: dailytempID, dailyvegesatID, dailycanvpressID
+    integer               :: middaytempID, middayvegesatID, middaycanvpressID
+    integer               :: tgrowthID, thomeID, nvpressconstrainedID
     integer               :: grossassimID, totalrespID, leafanetID
     integer               :: heightID, treesaiID, nvID, reprocID
     integer               :: dailynetcID, dailygppID, nppaccID, fracstoreID
@@ -481,132 +547,138 @@ contains
       (/this%n_time, this%n_leaf, this%n_light, this%n_year, this%n_ppfd/), 5, dimIDs)
 
     ! register day index
-    call RegisterVar(ncid, dim_names(1), dimIDs(1:1), type_int,                &
-      [character(len=20)  :: 'units', 'long_name'],                           &
-      [character(len=150) :: '', 'day index within this light level''s trajectory, 1 = first simulated day'], &
-      2, timeID)
+    call RegisterVarAtts(ncid, dim_names(1), dimIDs(1:1), type_int, '',                 &
+      'day index within this light level''s trajectory, 1 = first simulated day',       &
+      timeID)
 
     ! register leaf layer
-    call RegisterVar(ncid, dim_names(2), dimIDs(2:2), type_int,                &
-      [character(len=20)  :: 'units', 'long_name'],                           &
-      [character(len=150) :: '', 'leaf layer index, 1 = top of crown (compile-time max nlevleaf; unoccupied layers filled)'], &
-      2, leaflayerID)
+    call RegisterVarAtts(ncid, dim_names(2), dimIDs(2:2), type_int, '',                 &
+      'leaf layer index, 1 = top of crown (compile-time max nlevleaf; unoccupied layers filled)', &
+      leaflayerID)
 
     ! register light level
-    call RegisterVar(ncid, dim_names(3), dimIDs(3:3), type_double,             &
-      [character(len=20)  :: 'units', 'long_name'],                           &
-      [character(len=150) :: 'fraction', 'incident light fraction, relative to full sun'], &
-      2, lightfracID)
+    call RegisterVarAtts(ncid, dim_names(3), dimIDs(3:3), type_double, 'fraction',      &
+      'incident light fraction, relative to full sun', lightfracID)
 
     ! register year
-    call RegisterVar(ncid, dim_names(4), dimIDs(4:4), type_int,                &
-      [character(len=20)  :: 'units', 'long_name'],                           &
-      [character(len=150) :: '', 'simulated year index, 1 = first year'], 2, yearID)
+    call RegisterVarAtts(ncid, dim_names(4), dimIDs(4:4), type_int, '',                 &
+      'simulated year index, 1 = first year', yearID)
 
     ! register ppfd
-    call RegisterVar(ncid, dim_names(5), dimIDs(5:5), type_double,             &
-      [character(len=20)  :: 'units', 'long_name'],                           &
-      [character(len=150) :: 'umol m-2 s-1',                                  &
-      'incident PPFD swept by the instantaneous light-response diagnostic'],   &
-      2, ppfdID)
+    call RegisterVarAtts(ncid, dim_names(5), dimIDs(5:5), type_double, 'umol m-2 s-1',  &
+      'incident PPFD swept by the instantaneous light-response diagnostic', ppfdID)
 
     ! ------------------------------------------------------------------
     ! shade-tolerance metric set - always registered (see module header)
     ! ------------------------------------------------------------------
 
-    call RegisterVar(ncid, 'dbh', (/dimIDs(1), dimIDs(3)/), type_double,       &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'cm', 'dbh'], 3, dbhID)
+    call RegisterVarAtts(ncid, 'dbh', (/dimIDs(1), dimIDs(3)/), type_double, 'cm',      &
+      'dbh', dbhID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'treelai', (/dimIDs(1), dimIDs(3)/), type_double,   &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'm2 m-2', 'total leaf area index'], &
-      3, treelaiID)
+    call RegisterVarAtts(ncid, 'treelai', (/dimIDs(1), dimIDs(3)/), type_double,        &
+      'm2 m-2', 'total leaf area index', treelaiID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'crown_area', (/dimIDs(1), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'm2', 'crown area'], 3, crownareaID)
+    call RegisterVarAtts(ncid, 'crown_area', (/dimIDs(1), dimIDs(3)/), type_double,     &
+      'm2', 'crown area', crownareaID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'leaf_c', (/dimIDs(1), dimIDs(3)/), type_double,    &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'kgC indiv-1', 'leaf carbon'], &
-      3, leafcID)
+    call RegisterVarAtts(ncid, 'leaf_c', (/dimIDs(1), dimIDs(3)/), type_double,         &
+      'kgC indiv-1', 'leaf carbon', leafcID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'fnrt_c', (/dimIDs(1), dimIDs(3)/), type_double,    &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'kgC indiv-1', 'fine root carbon'], &
-      3, fnrtcID)
+    call RegisterVarAtts(ncid, 'fnrt_c', (/dimIDs(1), dimIDs(3)/), type_double,         &
+      'kgC indiv-1', 'fine root carbon', fnrtcID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'sapw_c', (/dimIDs(1), dimIDs(3)/), type_double,    &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'kgC indiv-1', 'sapwood carbon'], &
-      3, sapwcID)
+    call RegisterVarAtts(ncid, 'sapw_c', (/dimIDs(1), dimIDs(3)/), type_double,         &
+      'kgC indiv-1', 'sapwood carbon', sapwcID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'struct_c', (/dimIDs(1), dimIDs(3)/), type_double,  &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'kgC indiv-1', 'structural carbon'], &
-      3, structcID)
+    call RegisterVarAtts(ncid, 'struct_c', (/dimIDs(1), dimIDs(3)/), type_double,       &
+      'kgC indiv-1', 'structural carbon', structcID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'storage_c', (/dimIDs(1), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'kgC indiv-1', 'storage carbon'], &
-      3, storagecID)
+    call RegisterVarAtts(ncid, 'storage_c', (/dimIDs(1), dimIDs(3)/), type_double,      &
+      'kgC indiv-1', 'storage carbon', storagecID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'n', (/dimIDs(1), dimIDs(3)/), type_double,         &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'indiv',                    &
-      'cohort number density (surviving fraction of the original recruitment cohort)'], &
-      3, nID)
+    call RegisterVarAtts(ncid, 'n', (/dimIDs(1), dimIDs(3)/), type_double, 'indiv',     &
+      'cohort number density (surviving fraction of the original recruitment cohort)',  &
+      nID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'light_intercept_eff', (/dimIDs(1), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', '-',                        &
-      'light interception efficiency: whole-plant absorbed PAR / absorbed PAR of an equal-leaf-area, zero-self-shading reference surface, energy-weighted over the day (Sterck et al. 2013)'], &
-      3, lightintercepteffID)
+    call RegisterVarAtts(ncid, 'light_intercept_eff', (/dimIDs(1), dimIDs(3)/),         &
+      type_double, '-',                                                                 &
+      'light interception efficiency: whole-plant absorbed PAR / absorbed PAR of an equal-leaf-area, zero-self-shading reference surface, energy-weighted over the day (Sterck et al. 2013)', &
+      lightintercepteffID, coordinates='time light_level')
 
-    call RegisterVar(ncid, 'daily_absorbed_par_indiv', (/dimIDs(1), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'time light_level', 'J indiv-1 day-1',           &
-      'whole-plant absorbed PAR per individual (Onoda et al. 2013''s Phi) - divide by treelai*crown_area/n for Phi/LA (LIE_LA), by a chosen biomass-pool total for Phi/M (LIE_M), or use its running sum against a biomass increment for LUE'], &
-      3, dailyabsorbedparindivID)
+    call RegisterVarAtts(ncid, 'daily_absorbed_par_indiv', (/dimIDs(1), dimIDs(3)/),    &
+      type_double, 'J indiv-1 day-1',                                                   &
+      'whole-plant absorbed PAR per individual (Onoda et al. 2013''s Phi) - divide by treelai*crown_area/n for Phi/LA (LIE_LA), by a chosen biomass-pool total for Phi/M (LIE_M), or use its running sum against a biomass increment for LUE', &
+      dailyabsorbedparindivID, coordinates='time light_level')
+
+    ! daily environmental forcing, dimensioned (time) only - the forcing is a
+    ! function of day and hour alone, so it does not vary across light levels
+    ! (see the module header comment). Kept regardless of reduced_output.
+    call RegisterVarAtts(ncid, 'daily_temp', dimIDs(1:1), type_double, 'K',             &
+      'daily-mean vegetation temperature (mean over the day''s sub-daily substeps)',    &
+      dailytempID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 'daily_veg_esat', dimIDs(1:1), type_double, 'Pa',        &
+      'daily-mean saturation vapor pressure at the vegetation temperature',             &
+      dailyvegesatID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 'daily_can_vpress', dimIDs(1:1), type_double, 'Pa',      &
+      'daily-mean canopy air vapor pressure - with daily_veg_esat gives daily-mean VPD (veg_esat - can_vpress) and RH (can_vpress/veg_esat)', &
+      dailycanvpressID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 'midday_temp', dimIDs(1:1), type_double, 'K',            &
+      'vegetation temperature at the sub-daily substep nearest solar noon',             &
+      middaytempID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 'midday_veg_esat', dimIDs(1:1), type_double, 'Pa',       &
+      'saturation vapor pressure at the substep nearest solar noon',                    &
+      middayvegesatID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 'midday_can_vpress', dimIDs(1:1), type_double, 'Pa',     &
+      'canopy air vapor pressure at the substep nearest solar noon - with midday_veg_esat gives the midday VPD that drives stomatal conductance when PAR is highest', &
+      middaycanvpressID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 't_growth', dimIDs(1:1), type_double, 'K',               &
+      '10-day running-mean growth temperature (photosynthetic acclimation boundary condition)', &
+      tgrowthID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 't_home', dimIDs(1:1), type_double, 'K',                 &
+      'long-term running-mean home temperature (photosynthetic acclimation boundary condition)', &
+      thomeID, coordinates='time')
+
+    call RegisterVarAtts(ncid, 'n_vpress_constrained', dimIDs(1:1), type_int, '-',      &
+      'number of sub-daily substeps this day at which the prescribed canopy vapor pressure was altered by the saturation/minimum constraint - nonzero means the run was not forced with the humidity boundary condition it asked for', &
+      nvpressconstrainedID, coordinates='time')
 
     ! whole-trajectory Ci-solver summary, dimensioned (light_level) - cheap,
     ! kept regardless of reduced_output (see module header comment)
-    call RegisterVar(ncid, 'mean_ci_solve_iter', dimIDs(3:3), type_double,     &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'light_level', '-',                             &
-      'mean Ci-solver iteration count over every LeafLayerPhotosynthesis call in this trajectory'], &
-      3, meancisolveiterID)
+    call RegisterVarAtts(ncid, 'mean_ci_solve_iter', dimIDs(3:3), type_double, '-',     &
+      'mean Ci-solver iteration count over every LeafLayerPhotosynthesis call in this trajectory', &
+      meancisolveiterID, coordinates='light_level')
 
-    call RegisterVar(ncid, 'n_bisection_fallbacks', dimIDs(3:3), type_int,     &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'light_level', '-',                             &
-      'count of LeafLayerPhotosynthesis calls that fell back to CiBisection in this trajectory'], &
-      3, nbisectionfallbacksID)
+    call RegisterVarAtts(ncid, 'n_bisection_fallbacks', dimIDs(3:3), type_int, '-',     &
+      'count of LeafLayerPhotosynthesis calls that fell back to CiBisection in this trajectory', &
+      nbisectionfallbacksID, coordinates='light_level')
 
     ! instantaneous light-response diagnostics, dimensioned (ppfd, year,
     ! light_level) - see test_SingleCohort.F90's LightResponseSweep/
     ! LeafNetAssimSweep
-    call RegisterVar(ncid, 'gross_assim', (/dimIDs(5), dimIDs(4), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'ppfd year light_level', 'kgC indiv-1 s-1',      &
-      'whole-plant gross assimilation at each swept PPFD (first day of year, pure diffuse illumination, coszen=1)'], &
-      3, grossassimID)
+    call RegisterVarAtts(ncid, 'gross_assim', (/dimIDs(5), dimIDs(4), dimIDs(3)/),      &
+      type_double, 'kgC indiv-1 s-1',                                                   &
+      'whole-plant gross assimilation at each swept PPFD (first day of year, pure diffuse illumination, coszen=1)', &
+      grossassimID, coordinates='ppfd year light_level')
 
-    call RegisterVar(ncid, 'total_resp', (/dimIDs(5), dimIDs(4), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'ppfd year light_level', 'kgC indiv-1 s-1',      &
-      'whole-plant total respiration (leaf dark + non-leaf maintenance) at each swept PPFD (first day of year)'], &
-      3, totalrespID)
+    call RegisterVarAtts(ncid, 'total_resp', (/dimIDs(5), dimIDs(4), dimIDs(3)/),       &
+      type_double, 'kgC indiv-1 s-1',                                                   &
+      'whole-plant total respiration (leaf dark + non-leaf maintenance) at each swept PPFD (first day of year)', &
+      totalrespID, coordinates='ppfd year light_level')
 
     ! unlike gross_assim/total_resp above (whole-plant, kgC indiv-1 s-1), this
     ! is an area-based leaf-level rate (umol m-2 s-1), swept with no canopy
     ! attenuation, at a single fixed canopy layer (leaf_lcp_layer)
-    call RegisterVar(ncid, 'leaf_anet', (/dimIDs(5), dimIDs(4), dimIDs(3)/), type_double, &
-      [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-      [character(len=150) :: 'ppfd year light_level', 'umol m-2 s-1',         &
-      'leaf-level net photosynthesis (Aarea) at each swept PPFD, applied directly to a single canopy layer with no canopy attenuation or self-shading (first day of year) (Sterck et al. 2013)'], &
-      3, leafanetID)
+    call RegisterVarAtts(ncid, 'leaf_anet', (/dimIDs(5), dimIDs(4), dimIDs(3)/),        &
+      type_double, 'umol m-2 s-1',                                                      &
+      'leaf-level net photosynthesis (Aarea) at each swept PPFD, applied directly to a single canopy layer with no canopy attenuation or self-shading (first day of year) (Sterck et al. 2013)', &
+      leafanetID, coordinates='ppfd year light_level')
 
     ! ------------------------------------------------------------------
     ! everything else - skipped entirely in reduced_output mode (see Init)
@@ -614,127 +686,104 @@ contains
 
     if (.not. this%reduced_output) then
 
-      call RegisterVar(ncid, 'height', (/dimIDs(1), dimIDs(3)/), type_double,    &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'm', 'height'], 3, heightID)
+      call RegisterVarAtts(ncid, 'height', (/dimIDs(1), dimIDs(3)/), type_double, 'm',  &
+        'height', heightID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'treesai', (/dimIDs(1), dimIDs(3)/), type_double,   &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'm2 m-2', 'total stem area index'], &
-        3, treesaiID)
+      call RegisterVarAtts(ncid, 'treesai', (/dimIDs(1), dimIDs(3)/), type_double,      &
+        'm2 m-2', 'total stem area index', treesaiID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'nv', (/dimIDs(1), dimIDs(3)/), type_int,           &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', '-', 'number of occupied leaf+stem layers'], &
-        3, nvID)
+      call RegisterVarAtts(ncid, 'nv', (/dimIDs(1), dimIDs(3)/), type_int, '-',         &
+        'number of occupied leaf+stem layers', nvID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'repro_c', (/dimIDs(1), dimIDs(3)/), type_double,   &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1', 'reproductive carbon'], &
-        3, reprocID)
+      call RegisterVarAtts(ncid, 'repro_c', (/dimIDs(1), dimIDs(3)/), type_double,      &
+        'kgC indiv-1', 'reproductive carbon', reprocID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_net_c', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1',          &
-        'daily net carbon (GPP - leaf dark resp - nonleaf MR) - equal to daily_gpp - daily_rdark - daily_livestem_mr - daily_livecroot_mr - daily_froot_mr by construction'], &
-        3, dailynetcID)
+      call RegisterVarAtts(ncid, 'daily_net_c', (/dimIDs(1), dimIDs(3)/), type_double,  &
+        'kgC indiv-1 day-1',                                                            &
+        'daily net carbon (GPP - leaf dark resp - nonleaf MR) - equal to daily_gpp - daily_rdark - daily_livestem_mr - daily_livecroot_mr - daily_froot_mr by construction', &
+        dailynetcID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_gpp', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily GPP'], &
-        3, dailygppID)
+      call RegisterVarAtts(ncid, 'daily_gpp', (/dimIDs(1), dimIDs(3)/), type_double,    &
+        'kgC indiv-1 day-1', 'daily GPP', dailygppID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_rdark', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily leaf dark respiration'], &
-        3, dailyrdarkID)
+      call RegisterVarAtts(ncid, 'daily_rdark', (/dimIDs(1), dimIDs(3)/), type_double,  &
+        'kgC indiv-1 day-1', 'daily leaf dark respiration', dailyrdarkID,               &
+        coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_livestem_mr', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1',          &
-        'daily live stem (aboveground sapwood) maintenance respiration'], 3, dailylivestemmrID)
+      call RegisterVarAtts(ncid, 'daily_livestem_mr', (/dimIDs(1), dimIDs(3)/),         &
+        type_double, 'kgC indiv-1 day-1',                                               &
+        'daily live stem (aboveground sapwood) maintenance respiration',                &
+        dailylivestemmrID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_livecroot_mr', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1',          &
-        'daily live coarse root (belowground sapwood) maintenance respiration'], 3, dailylivecrootmrID)
+      call RegisterVarAtts(ncid, 'daily_livecroot_mr', (/dimIDs(1), dimIDs(3)/),        &
+        type_double, 'kgC indiv-1 day-1',                                               &
+        'daily live coarse root (belowground sapwood) maintenance respiration',         &
+        dailylivecrootmrID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_froot_mr', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily fine root maintenance respiration'], &
-        3, dailyfrootmrID)
+      call RegisterVarAtts(ncid, 'daily_froot_mr', (/dimIDs(1), dimIDs(3)/),            &
+        type_double, 'kgC indiv-1 day-1', 'daily fine root maintenance respiration',    &
+        dailyfrootmrID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'daily_growth_resp', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily growth respiration'], &
-        3, dailygrowthrespID)
+      call RegisterVarAtts(ncid, 'daily_growth_resp', (/dimIDs(1), dimIDs(3)/),         &
+        type_double, 'kgC indiv-1 day-1', 'daily growth respiration',                   &
+        dailygrowthrespID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'leaf_turnover', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily leaf turnover loss'], &
-        3, leafturnoverID)
+      call RegisterVarAtts(ncid, 'leaf_turnover', (/dimIDs(1), dimIDs(3)/),             &
+        type_double, 'kgC indiv-1 day-1', 'daily leaf turnover loss', leafturnoverID,   &
+        coordinates='time light_level')
 
-      call RegisterVar(ncid, 'fnrt_turnover', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily fine root turnover loss'], &
-        3, fnrtturnoverID)
+      call RegisterVarAtts(ncid, 'fnrt_turnover', (/dimIDs(1), dimIDs(3)/),             &
+        type_double, 'kgC indiv-1 day-1', 'daily fine root turnover loss',              &
+        fnrtturnoverID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'sapw_turnover', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily sapwood turnover loss'], &
-        3, sapwturnoverID)
+      call RegisterVarAtts(ncid, 'sapw_turnover', (/dimIDs(1), dimIDs(3)/),             &
+        type_double, 'kgC indiv-1 day-1', 'daily sapwood turnover loss',                &
+        sapwturnoverID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'struct_turnover', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1', 'daily structural turnover loss'], &
-        3, structturnoverID)
+      call RegisterVarAtts(ncid, 'struct_turnover', (/dimIDs(1), dimIDs(3)/),           &
+        type_double, 'kgC indiv-1 day-1', 'daily structural turnover loss',             &
+        structturnoverID, coordinates='time light_level')
 
-      call RegisterVar(ncid, 'npp_acc', (/dimIDs(1), dimIDs(3)/), type_double,   &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'kgC indiv-1 day-1',          &
-        'carbon balance handed to PARTEH (net of growth respiration)'], 3, nppaccID)
+      call RegisterVarAtts(ncid, 'npp_acc', (/dimIDs(1), dimIDs(3)/), type_double,      &
+        'kgC indiv-1 day-1',                                                            &
+        'carbon balance handed to PARTEH (net of growth respiration)', nppaccID,        &
+        coordinates='time light_level')
 
-      call RegisterVar(ncid, 'frac_store', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', '-',                        &
-        'storage carbon as a fraction of target leaf carbon'], 3, fracstoreID)
+      call RegisterVarAtts(ncid, 'frac_store', (/dimIDs(1), dimIDs(3)/), type_double,   &
+        '-', 'storage carbon as a fraction of target leaf carbon', fracstoreID,         &
+        coordinates='time light_level')
 
-      call RegisterVar(ncid, 'cmort', (/dimIDs(1), dimIDs(3)/), type_double,     &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', 'indiv yr-1',                &
-        'carbon starvation mortality rate'], 3, cmortID)
+      call RegisterVarAtts(ncid, 'cmort', (/dimIDs(1), dimIDs(3)/), type_double,        &
+        'indiv yr-1', 'carbon starvation mortality rate', cmortID,                      &
+        coordinates='time light_level')
 
-      call RegisterVar(ncid, 'maintresp_reduction_factor', (/dimIDs(1), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'time light_level', '-',                        &
-        'storage-based maintenance-respiration throttle'], 3, maintrespreductionfactorID)
+      call RegisterVarAtts(ncid, 'maintresp_reduction_factor',                          &
+        (/dimIDs(1), dimIDs(3)/), type_double, '-',                                     &
+        'storage-based maintenance-respiration throttle', maintrespreductionfactorID,   &
+        coordinates='time light_level')
 
       ! per-leaf-layer light profile, dimensioned (nlevleaf, year, light_level),
       ! with unoccupied layers above that year's nv filled with fates_unset_r8
-      call RegisterVar(ncid, 'parsun_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'nlevleaf year light_level', 'W m-2',            &
-        'absorbed PAR, sunlit leaves, per unit ground area (first day of year, solar noon)'], &
-        3, parsunID)
+      call RegisterVarAtts(ncid, 'parsun_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/),       &
+        type_double, 'W m-2',                                                           &
+        'absorbed PAR, sunlit leaves, per unit ground area (first day of year, solar noon)', &
+        parsunID, coordinates='nlevleaf year light_level')
       call RegisterFillValue(ncid, parsunID, fates_unset_r8)
 
-      call RegisterVar(ncid, 'parsha_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'nlevleaf year light_level', 'W m-2',            &
-        'absorbed PAR, shaded leaves, per unit ground area (first day of year, solar noon)'], &
-        3, parshaID)
+      call RegisterVarAtts(ncid, 'parsha_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/),       &
+        type_double, 'W m-2',                                                           &
+        'absorbed PAR, shaded leaves, per unit ground area (first day of year, solar noon)', &
+        parshaID, coordinates='nlevleaf year light_level')
       call RegisterFillValue(ncid, parshaID, fates_unset_r8)
 
-      call RegisterVar(ncid, 'laisun_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'nlevleaf year light_level', 'm2 m-2',           &
-        'sunlit LAI (first day of year, solar noon)'], 3, laisunID)
+      call RegisterVarAtts(ncid, 'laisun_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/),       &
+        type_double, 'm2 m-2', 'sunlit LAI (first day of year, solar noon)', laisunID,  &
+        coordinates='nlevleaf year light_level')
       call RegisterFillValue(ncid, laisunID, fates_unset_r8)
 
-      call RegisterVar(ncid, 'laisha_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/), type_double, &
-        [character(len=20)  :: 'coordinates', 'units', 'long_name'],             &
-        [character(len=150) :: 'nlevleaf year light_level', 'm2 m-2',           &
-        'shaded LAI (first day of year, solar noon)'], 3, laishaID)
+      call RegisterVarAtts(ncid, 'laisha_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/),       &
+        type_double, 'm2 m-2', 'shaded LAI (first day of year, solar noon)', laishaID,  &
+        coordinates='nlevleaf year light_level')
       call RegisterFillValue(ncid, laishaID, fates_unset_r8)
 
     end if
@@ -758,6 +807,15 @@ contains
     call WriteVar(ncid, nID, this%n(:,:))
     call WriteVar(ncid, lightintercepteffID, this%light_intercept_eff(:,:))
     call WriteVar(ncid, dailyabsorbedparindivID, this%daily_absorbed_par_indiv(:,:))
+    call WriteVar(ncid, dailytempID, this%daily_temp(:))
+    call WriteVar(ncid, dailyvegesatID, this%daily_veg_esat(:))
+    call WriteVar(ncid, dailycanvpressID, this%daily_can_vpress(:))
+    call WriteVar(ncid, middaytempID, this%midday_temp(:))
+    call WriteVar(ncid, middayvegesatID, this%midday_veg_esat(:))
+    call WriteVar(ncid, middaycanvpressID, this%midday_can_vpress(:))
+    call WriteVar(ncid, tgrowthID, this%t_growth(:))
+    call WriteVar(ncid, thomeID, this%t_home(:))
+    call WriteVar(ncid, nvpressconstrainedID, this%n_vpress_constrained(:))
     call WriteVar(ncid, meancisolveiterID, this%mean_ci_solve_iter(:))
     call WriteVar(ncid, nbisectionfallbacksID, this%n_bisection_fallbacks(:))
     call WriteVar(ncid, ppfdID, ppfd_values(:))
