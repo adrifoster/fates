@@ -14,15 +14,11 @@ module FatesTestLightEnvMod
   !
 
   use FatesConstantsMod,    only : r8 => fates_r8
-  use FatesConstantsMod,    only : pi_const
-  use FatesConstantsMod,    only : rad_per_deg
-  use FatesConstantsMod,    only : wm2_to_umolm2s
   use EDParamsMod,          only : GetNVegLayers
   use FatesAllometryMod,    only : VegAreaLayer
   use FatesRadiationMemMod, only : ivis
   use TwoStreamMLPEMod,     only : twostream_type
   use TwoStreamMLPEMod,     only : normalized_upper_boundary
-  use FatesTestSiteMod,     only : latitude_deg
 
   implicit none
   private
@@ -30,13 +26,9 @@ module FatesTestLightEnvMod
   ! ------------------------------------------------------------------------------------
   ! PRESCRIBED LIGHT ENVIRONMENT ASSUMPTIONS
   ! ------------------------------------------------------------------------------------
-  real(r8), public, parameter :: ref_par_full_sun  = 1500.0_r8/wm2_to_umolm2s ! reference full-sun incident PAR at cosz=1 [W/m2] (~2000 umol/m2/s)
-  real(r8), public, parameter :: direct_frac       = 0.85_r8                  ! fraction of incident PAR that is direct beam (typical clear sky)
-  real(r8), public, parameter :: diffuse_frac      = 1.0_r8 - direct_frac     ! fraction of incident PAR that is diffuse
-  real(r8), parameter         :: max_declin_deg    = 23.45_r8                 ! Earth's obliquity, used as the declination amplitude (Cooper 1969) [deg]
-  real(r8), parameter         :: ground_albedo_par = 0.10_r8                  ! soil/litter PAR albedo (diffuse and beam)
-  real(r8), parameter         :: frac_snow         = 0.0_r8                   ! canopy snow-covered fraction (no snow)
-  real(r8), parameter         :: snow_depth        = 0.0_r8                   ! physical snow depth [m] (no snow)
+  real(r8), parameter :: ground_albedo_par = 0.10_r8 ! soil/litter PAR albedo (diffuse and beam)
+  real(r8), parameter :: frac_snow         = 0.0_r8  ! canopy snow-covered fraction (no snow)
+  real(r8), parameter :: snow_depth        = 0.0_r8  ! physical snow depth [m] (no snow)
 
   type, public :: light_env_type
 
@@ -44,21 +36,20 @@ module FatesTestLightEnvMod
 
      integer              :: pft     ! plant functional type index
      integer              :: nv      ! number of occupied leaf layers
-     real(r8), public     :: treelai ! saved cohort total leaf area index [m2/m2]
-     real(r8)             :: treesai ! saved cohort total stem area index [m2/m2]
+     real(r8), public     :: treelai ! saved in-crown total leaf area index [m2 leaf/m2 crown footprint]
+     real(r8)             :: treesai ! saved in-crown total stem area index [m2 stem/m2 crown footprint]
      real(r8)             :: height  ! saved cohort height [m]
      type(twostream_type) :: twostr  ! two-stream radiation object (one element)
 
-     real(r8), public, allocatable :: parsun_z(:) ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 ground]
-     real(r8), public, allocatable :: parsha_z(:) ! absorbed PAR, shaded leaves, per leaf layer [W/m2 ground]
-     real(r8), public, allocatable :: laisun_z(:) ! sunlit LAI per leaf layer [m2/m2]
-     real(r8), public, allocatable :: laisha_z(:) ! shaded LAI per leaf layer [m2/m2]
+     real(r8), public, allocatable :: parsun_z(:) ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 crown footprint]
+     real(r8), public, allocatable :: parsha_z(:) ! absorbed PAR, shaded leaves, per leaf layer [W/m2 crown footprint]
+     real(r8), public, allocatable :: laisun_z(:) ! sunlit LAI per leaf layer [m2 leaf/m2 crown footprint]
+     real(r8), public, allocatable :: laisha_z(:) ! shaded LAI per leaf layer [m2 leaf/m2 crown footprint]
 
    contains
 
      procedure, public :: Init
      procedure, public :: Refresh
-     procedure, public :: Profile
      procedure, public :: AttenuateCanopy
      procedure, public :: Free
 
@@ -143,7 +134,6 @@ contains
 
   ! ==========================================================================
   
-  
   subroutine AttenuateCanopy(this, par_beam, par_diff, coszen, parsun_z, parsha_z, laisun_z, laisha_z)
     !
     ! DESCRIPTION:
@@ -156,17 +146,17 @@ contains
     real(r8),               intent(in)    :: par_beam    ! direct-beam incident PAR at the top of the crown [W/m2]
     real(r8),               intent(in)    :: par_diff    ! diffuse incident PAR at the top of the crown [W/m2]
     real(r8),               intent(in)    :: coszen      ! cosine of the solar zenith angle to use for this solve [-1 to 1]; <=0 is treated as no incident PAR
-    real(r8),               intent(out)   :: parsun_z(:) ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 ground]
-    real(r8),               intent(out)   :: parsha_z(:) ! absorbed PAR, shaded leaves, per leaf layer [W/m2 ground]
-    real(r8),               intent(out)   :: laisun_z(:) ! sunlit LAI per leaf layer [m2/m2]
-    real(r8),               intent(out)   :: laisha_z(:) ! shaded LAI per leaf layer [m2/m2]
+    real(r8),               intent(out)   :: parsun_z(:) ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 crown footprint]
+    real(r8),               intent(out)   :: parsha_z(:) ! absorbed PAR, shaded leaves, per leaf layer [W/m2 crown footprint]
+    real(r8),               intent(out)   :: laisun_z(:) ! sunlit LAI per leaf layer [m2 leaf/m2 crown footprint]
+    real(r8),               intent(out)   :: laisha_z(:) ! shaded LAI per leaf layer [m2 leaf/m2 crown footprint]
 
     ! LOCALS:
     real(r8) :: vai_top, vai_bot         ! vegetation area index bounds of the current leaf layer
     real(r8) :: elai_layer, esai_layer   ! exposed leaf/stem area index of the current leaf layer
-    real(r8) :: Rb_abs, Rd_abs           ! total absorbed beam/diffuse radiation, current layer [W/m2 ground]
-    real(r8) :: Rb_abs_leaf, Rd_abs_leaf ! absorbed beam/diffuse radiation from leaves, current layer [W/m2 ground]
-    real(r8) :: R_abs_stem, R_abs_snow   ! absorbed radiation from stems/snow, current layer [W/m2 ground]
+    real(r8) :: Rb_abs, Rd_abs           ! total absorbed beam/diffuse radiation, current layer [W/m2 crown footprint]
+    real(r8) :: Rb_abs_leaf, Rd_abs_leaf ! absorbed beam/diffuse radiation from leaves, current layer [W/m2 crown footprint]
+    real(r8) :: R_abs_stem, R_abs_snow   ! absorbed radiation from stems/snow, current layer [W/m2 crown footprint]
     real(r8) :: leaf_sun_frac            ! sunlit fraction of leaf area in the current layer
     real(r8) :: taulamb(2)               ! two-stream solve scratch space (size = 2*n_scel = 2)
     real(r8) :: omega(2,2)               ! two-stream solve scratch space
@@ -181,9 +171,7 @@ contains
     integer  :: iv                       ! leaf-layer looping index
     logical  :: call_fail                ! GetAbsRad failure flag
 
-    ! No incident PAR: skip the solve entirely rather than calling ZenithPrep with a
-    ! non-positive coszen, and treat all leaf area as shaded (there is no sun to
-    ! define a sunlit fraction against).
+    ! no incident PAR: skip the solve and treat all leaf area as shaded
     if (par_beam + par_diff <= 0.0_r8 .or. coszen <= 0.0_r8) then
       parsun_z(:) = 0.0_r8
       parsha_z(:) = 0.0_r8
@@ -196,15 +184,6 @@ contains
       return
     end if
 
-    ! ZenithPrep + Solve are always run with the literal normalized boundary
-    ! (Rbeam_atm=Rdiff_atm=1) - Solve's internal energy-conservation check is
-    ! hardwired to that convention (FatesRadiationDriveMod.F90). 
-    ! This produces normalized scattering coefficients (per unit incident beam/diffuse) 
-    ! that do not themselves depend on the real light magnitude. The real incident PAR is 
-    ! applied afterward by assigning it directly to twostr%band(ivis)%Rbeam_atm/Rdiff_atm 
-    ! (bypassing Solve entirely for that step, mirroring FatesRadiationDriveMod),
-    ! which is what GetAbsRad actually reads to scale the normalized profile to
-    ! real absorbed radiation.
     call this%twostr%ZenithPrep(coszen)
     call this%twostr%Solve(ivis, normalized_upper_boundary, 1.0_r8, 1.0_r8,         &
       taulamb, omega, ipiv, albedo_beam, albedo_diff, consv_err,                    &
@@ -219,8 +198,6 @@ contains
         this%pft, snow_depth, vai_top, vai_bot, elai_layer, esai_layer)
       call this%twostr%GetAbsRad(1, 1, ivis, vai_top, vai_bot, Rb_abs, Rd_abs,       &
         Rd_abs_leaf, Rb_abs_leaf, R_abs_stem, R_abs_snow, leaf_sun_frac, call_fail)
-      ! per unit ground area, matching GetAbsRad's own convention and how
-      ! FatesPlantRespPhotosynthMod.F90 (par_per_sunla/par_per_shala) uses it
       parsun_z(iv) = Rb_abs_leaf + Rd_abs_leaf*leaf_sun_frac
       parsha_z(iv) = Rd_abs_leaf*(1.0_r8 - leaf_sun_frac)
       laisun_z(iv) = elai_layer*leaf_sun_frac
@@ -228,102 +205,6 @@ contains
     end do
 
   end subroutine AttenuateCanopy
-
-  ! ==========================================================================
-
-  subroutine Profile(this, light_frac, day_of_year, hour_of_day, par_toc_out)
-    !
-    ! DESCRIPTION:
-    ! Prescribe incident PAR at the top of the crown for the given light fraction,
-    ! day of year, and hour of day, and attenuate it through the cohort's own leaf
-    ! layers via AttenuateCanopy, filling this%parsun_z/parsha_z/laisun_z/laisha_z
-    ! (this type's own persistent per-substep state). par_toc_out optionally
-    ! returns the incident PAR this substep actually used, for callers (e.g. the
-    ! driver's light-interception-efficiency diagnostic) that need it alongside
-    ! the attenuated profile rather than re-deriving it themselves.
-
-    ! ARGUMENTS:
-    class(light_env_type), intent(inout) :: this        ! light environment object
-    real(r8),               intent(in)   :: light_frac  ! incident light fraction [0-1]
-    integer,                intent(in)   :: day_of_year ! day of year [1-365], drives the solar declination
-    real(r8),               intent(in)   :: hour_of_day ! hour of day [0-24]
-    real(r8),               intent(out), optional :: par_toc_out ! total incident PAR at the top of the crown [W/m2]
-
-    ! LOCALS:
-    real(r8) :: declin   ! solar declination angle, today [radians]
-    real(r8) :: coszen   ! cosine of the solar zenith angle [-1 to 1]; <=0 is night
-    real(r8) :: par_toc  ! total incident PAR at the top of the crown [W/m2]
-    real(r8) :: par_beam ! direct-beam incident PAR at the top of the crown [W/m2]
-    real(r8) :: par_diff ! diffuse incident PAR at the top of the crown [W/m2]
-
-    declin = SolarDeclination(day_of_year)
-    coszen = CosSolarZenith(declin, hour_of_day)
-    ! clamped at zero: coszen<0 (sun below horizon) means no incident PAR, not
-    ! negative incident PAR - AttenuateCanopy's own par_beam+par_diff<=0 check
-    ! already handles this correctly internally regardless, but par_toc_out is
-    ! returned as-is to callers, so the physical quantity must be clamped here
-    ! rather than left to go negative
-    par_toc = max(0.0_r8, light_frac * ref_par_full_sun * coszen)
-    par_beam = direct_frac * par_toc
-    par_diff = diffuse_frac * par_toc
-    if (present(par_toc_out)) par_toc_out = par_toc
-
-    call this%AttenuateCanopy(par_beam, par_diff, coszen, this%parsun_z,        &
-      this%parsha_z, this%laisun_z, this%laisha_z)
-
-  end subroutine Profile
-
-  ! ==========================================================================
-
-  function SolarDeclination(day_of_year) result(declin)
-    !
-    ! DESCRIPTION:
-    ! Solar declination angle for the given day of year, via the Cooper (1969)
-    ! single-term sinusoidal approximation: a fixed present-day obliquity
-    ! (max_declin_deg) modulated by a sine wave phased so the northern-hemisphere
-    ! winter solstice falls near day 355 (day 284 + 10 days to solstice at the
-    ! 1/365 day-angle scale). No orbital eccentricity/perihelion correction.
-
-    ! ARGUMENTS:
-    integer, intent(in) :: day_of_year ! day of year [1-365]
-
-    ! RESULT:
-    real(r8) :: declin ! solar declination angle [radians]
-
-    declin = max_declin_deg * rad_per_deg *                                      &
-      sin(rad_per_deg * (360.0_r8/365.0_r8) * (284.0_r8 + real(day_of_year, r8)))
-
-  end function SolarDeclination
-
-  ! ==========================================================================
-
-  function CosSolarZenith(declin, hour_of_day) result(coszen)
-    !
-    ! DESCRIPTION:
-    ! Cosine of the solar zenith angle from the prescribed site latitude, today's
-    ! solar declination, and hour of day, via the standard hour-angle formula
-    ! (equivalent to CIME's shr_orb_cosz, share/src/shr_orb_mod.F90, re-expressed
-    ! in a local-solar-time hour angle measured from solar noon rather than a
-    ! Julian-day fraction + longitude). May be negative (sun below the horizon);
-    ! callers must not pass a non-positive result to ZenithPrep.
-
-    ! ARGUMENTS:
-    real(r8), intent(in) :: declin      ! solar declination angle [radians]
-    real(r8), intent(in) :: hour_of_day ! hour of day [0-24]
-
-    ! RESULT:
-    real(r8) :: coszen ! cosine of the solar zenith angle [-1 to 1]
-
-    ! LOCALS:
-    real(r8) :: lat_rad     ! prescribed site latitude [radians]
-    real(r8) :: hour_angle  ! solar hour angle, zero at solar noon [radians]
-
-    lat_rad = latitude_deg * rad_per_deg
-    hour_angle = (pi_const/12.0_r8) * (hour_of_day - 12.0_r8)
-
-    coszen = sin(lat_rad)*sin(declin) + cos(lat_rad)*cos(declin)*cos(hour_angle)
-
-  end function CosSolarZenith
 
   ! ==========================================================================
 

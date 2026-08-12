@@ -9,7 +9,6 @@ list(APPEND fates_sources
   FatesTestLightEnvMod.F90
   FatesTestEnvironmentMod.F90
   FatesTestCohortPhysMod.F90
-  FatesTestHistoryMod.F90
   FatesTestLeafPhotoMod.F90)
 
 sourcelist_to_parent(fates_sources)

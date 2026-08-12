@@ -22,9 +22,9 @@ program FatesRadiation
   integer,  allocatable         :: ipiv(:)      ! two-stream solve scratch space (LAPACK pivots)
   real(r8)                      :: vai_top      ! vai bin upper (top) bound [m2/m2]
   real(r8)                      :: vai_bot      ! vai bin lower (bottom) bound [m2/m2]
-  real(r8)                      :: rb_abs       ! total absorbed beam radiation, this bin (dummy) [W/m2 ground]
-  real(r8)                      :: rd_abs       ! total absorbed diffuse radiation, this bin (dummy) [W/m2 ground]
-  real(r8)                      :: r_abs_snow   ! absorbed radiation by snow, this bin (dummy, no snow) [W/m2 ground]
+  real(r8)                      :: rb_abs       ! total absorbed beam radiation, this bin (dummy) [W/m2 crown footprint]
+  real(r8)                      :: rd_abs       ! total absorbed diffuse radiation, this bin (dummy) [W/m2 crown footprint]
+  real(r8)                      :: r_abs_snow   ! absorbed radiation by snow, this bin (dummy, no snow) [W/m2 crown footprint]
   logical                       :: call_fail    ! GetAbsRad failure flag
 
   ! two-stream solve outputs not needed for the VAI profile (canopy-integrated diagnostics)
@@ -35,8 +35,8 @@ program FatesRadiation
   ! CONSTANTS:
   character(len=*), parameter :: out_file = 'radiation_out.nc' ! output file
   integer,  parameter :: pft           = 1     ! plant functional type of the cohort
-  real(r8), parameter :: lai           = 2.0_r8 ! cohort leaf area index [m2/m2]
-  real(r8), parameter :: sai           = 0.5_r8 ! cohort stem area index [m2/m2]
+  real(r8), parameter :: lai           = 2.0_r8 ! cohort in-crown leaf area index [m2 leaf/m2 crown footprint]
+  real(r8), parameter :: sai           = 0.5_r8 ! cohort in-crown stem area index [m2 stem/m2 crown footprint]
   real(r8), parameter :: area_frac     = 0.9_r8 ! fraction of ground covered by the cohort [-]
   real(r8), parameter :: ground_albedo = 0.1_r8 ! ground albedo, diffuse and beam [-]
   real(r8), parameter :: frac_snow     = 0.0_r8 ! canopy snow-covered fraction [-]
@@ -50,9 +50,9 @@ program FatesRadiation
   real(r8) :: r_beam(n_vai, num_swb)         ! normalized downwelling beam intensity [-]
   real(r8) :: r_diff_dn(n_vai, num_swb)      ! normalized downwelling diffuse intensity [-]
   real(r8) :: r_diff_up(n_vai, num_swb)      ! normalized upwelling diffuse intensity [-]
-  real(r8) :: rb_abs_leaf(n_vai, num_swb)    ! beam radiation absorbed by leaves, this bin [W/m2 ground]
-  real(r8) :: rd_abs_leaf(n_vai, num_swb)    ! diffuse radiation absorbed by leaves, this bin [W/m2 ground]
-  real(r8) :: r_abs_stem(n_vai, num_swb)     ! beam+diffuse radiation absorbed by stems, this bin [W/m2 ground]
+  real(r8) :: rb_abs_leaf(n_vai, num_swb)    ! beam radiation absorbed by leaves, this bin [W/m2 crown footprint]
+  real(r8) :: rd_abs_leaf(n_vai, num_swb)    ! diffuse radiation absorbed by leaves, this bin [W/m2 crown footprint]
+  real(r8) :: r_abs_stem(n_vai, num_swb)     ! beam+diffuse radiation absorbed by stems, this bin [W/m2 crown footprint]
   real(r8) :: leaf_sun_frac(n_vai, num_swb)  ! sunlit fraction of leaf area, this bin [-]
 
   interface
@@ -195,9 +195,9 @@ subroutine WriteRadiationData(out_file, n_vai, num_swb, vai, r_beam, r_diff_dn, 
   real(r8),         intent(in) :: r_beam(:,:)            ! normalized downwelling beam intensity [-]
   real(r8),         intent(in) :: r_diff_dn(:,:)         ! normalized downwelling diffuse intensity [-]
   real(r8),         intent(in) :: r_diff_up(:,:)         ! normalized upwelling diffuse intensity [-]
-  real(r8),         intent(in) :: rb_abs_leaf(:,:)       ! beam radiation absorbed by leaves [W/m2 ground]
-  real(r8),         intent(in) :: rd_abs_leaf(:,:)       ! diffuse radiation absorbed by leaves [W/m2 ground]
-  real(r8),         intent(in) :: r_abs_stem(:,:)        ! beam+diffuse radiation absorbed by stems [W/m2 ground]
+  real(r8),         intent(in) :: rb_abs_leaf(:,:)       ! beam radiation absorbed by leaves [W/m2 crown footprint]
+  real(r8),         intent(in) :: rd_abs_leaf(:,:)       ! diffuse radiation absorbed by leaves [W/m2 crown footprint]
+  real(r8),         intent(in) :: r_abs_stem(:,:)        ! beam+diffuse radiation absorbed by stems [W/m2 crown footprint]
   real(r8),         intent(in) :: leaf_sun_frac(:,:)     ! sunlit fraction of leaf area [-]
 
   ! LOCALS:
@@ -248,20 +248,20 @@ subroutine WriteRadiationData(out_file, n_vai, num_swb, vai, r_beam, r_diff_dn, 
     'normalized upwelling diffuse radiation intensity', rdiffupID,                      &
     coordinates='vai band')
 
-  ! register beam radiation absorbed by leaves
+  ! register beam radiation absorbed by leaves.
   call RegisterVarAtts(ncid, 'rb_abs_leaf', dimIDs(1:2), type_double, 'W m-2',          &
-    'beam radiation absorbed by leaves, per vai bin', rbabsleafID,                      &
-    coordinates='vai band')
+    'beam radiation absorbed by leaves per unit crown footprint area, per vai bin',     &
+    rbabsleafID, coordinates='vai band')
 
   ! register diffuse radiation absorbed by leaves
   call RegisterVarAtts(ncid, 'rd_abs_leaf', dimIDs(1:2), type_double, 'W m-2',          &
-    'diffuse radiation absorbed by leaves, per vai bin', rdabsleafID,                   &
-    coordinates='vai band')
+    'diffuse radiation absorbed by leaves per unit crown footprint area, per vai bin',  &
+    rdabsleafID, coordinates='vai band')
 
   ! register radiation absorbed by stems
   call RegisterVarAtts(ncid, 'r_abs_stem', dimIDs(1:2), type_double, 'W m-2',           &
-    'beam+diffuse radiation absorbed by stems, per vai bin', rabsstemID,                &
-    coordinates='vai band')
+    'beam+diffuse radiation absorbed by stems per unit crown footprint area, per vai bin', &
+    rabsstemID, coordinates='vai band')
 
   ! register sunlit fraction of leaves
   call RegisterVarAtts(ncid, 'leaf_sun_frac', dimIDs(1:2), type_double, '-',            &

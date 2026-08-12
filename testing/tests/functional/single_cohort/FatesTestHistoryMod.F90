@@ -159,8 +159,8 @@ module FatesTestHistoryMod
      integer,  allocatable :: n_bisection_fallbacks(:) ! count of those calls that fell back to CiBisection [-]
 
      ! per-leaf-layer light profile, dimensioned (nlevleaf, year, light_level)
-     real(r8), allocatable :: parsun_z(:,:,:) ! absorbed PAR, sunlit leaves [W/m2 ground]
-     real(r8), allocatable :: parsha_z(:,:,:) ! absorbed PAR, shaded leaves [W/m2 ground]
+     real(r8), allocatable :: parsun_z(:,:,:) ! absorbed PAR, sunlit leaves [W/m2 crown footprint]
+     real(r8), allocatable :: parsha_z(:,:,:) ! absorbed PAR, shaded leaves [W/m2 crown footprint]
      real(r8), allocatable :: laisun_z(:,:,:) ! sunlit LAI [m2/m2]
      real(r8), allocatable :: laisha_z(:,:,:) ! shaded LAI [m2/m2]
 
@@ -766,13 +766,13 @@ contains
       ! with unoccupied layers above that year's nv filled with fates_unset_r8
       call RegisterVarAtts(ncid, 'parsun_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/),       &
         type_double, 'W m-2',                                                           &
-        'absorbed PAR, sunlit leaves, per unit ground area (first day of year, solar noon)', &
+        'absorbed PAR, sunlit leaves, per unit crown footprint area (first day of year, solar noon)', &
         parsunID, coordinates='nlevleaf year light_level')
       call RegisterFillValue(ncid, parsunID, fates_unset_r8)
 
       call RegisterVarAtts(ncid, 'parsha_z', (/dimIDs(2), dimIDs(4), dimIDs(3)/),       &
         type_double, 'W m-2',                                                           &
-        'absorbed PAR, shaded leaves, per unit ground area (first day of year, solar noon)', &
+        'absorbed PAR, shaded leaves, per unit crown footprint area (first day of year, solar noon)', &
         parshaID, coordinates='nlevleaf year light_level')
       call RegisterFillValue(ncid, parshaID, fates_unset_r8)
 

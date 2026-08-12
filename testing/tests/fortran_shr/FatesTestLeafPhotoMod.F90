@@ -232,8 +232,8 @@ contains
     ! Returns zero for a layer holding effectively no leaf area at all
 
     ! ARGUMENTS:
-    real(r8), intent(in) :: laisun_z ! this layer's sunlit leaf area index [m2 leaf/m2 ground]
-    real(r8), intent(in) :: laisha_z ! this layer's shaded leaf area index [m2 leaf/m2 ground]
+    real(r8), intent(in) :: laisun_z ! this layer's sunlit leaf area index [m2 leaf/m2 crown footprint]
+    real(r8), intent(in) :: laisha_z ! this layer's shaded leaf area index [m2 leaf/m2 crown footprint]
     real(r8)             :: fsun     ! sunlit fraction of this layer's leaf area [0-1]
 
     if (laisun_z + laisha_z > nearzero) then
@@ -259,10 +259,10 @@ contains
     ! ARGUMENTS:
     integer,  intent(in)                 :: pft            ! plant functional type index
     type(leaf_capacity_type), intent(in) :: cap            ! this layer's capacity/dark respiration (see LeafLayerCapacity)
-    real(r8), intent(in)                 :: par_sun_z      ! absorbed PAR, sunlit leaves, this layer [W/m2 ground]
-    real(r8), intent(in)                 :: par_sha_z      ! absorbed PAR, shaded leaves, this layer [W/m2 ground]
-    real(r8), intent(in)                 :: lai_sun_z      ! sunlit leaf area index, this layer [m2 leaf/m2 ground]
-    real(r8), intent(in)                 :: lai_sha_z      ! shaded leaf area index, this layer [m2 leaf/m2 ground]
+    real(r8), intent(in)                 :: par_sun_z      ! absorbed PAR, sunlit leaves, this layer [W/m2 crown footprint]
+    real(r8), intent(in)                 :: par_sha_z      ! absorbed PAR, shaded leaves, this layer [W/m2 crown footprint]
+    real(r8), intent(in)                 :: lai_sun_z      ! sunlit leaf area index, this layer [m2 leaf/m2 crown footprint]
+    real(r8), intent(in)                 :: lai_sha_z      ! shaded leaf area index, this layer [m2 leaf/m2 crown footprint]
     real(r8), intent(in)                 :: veg_tempk      ! leaf temperature [K]
     real(r8), intent(in)                 :: can_press      ! air pressure at the leaf surface [Pa]
     real(r8), intent(in)                 :: can_co2_ppress ! CO2 partial pressure at the leaf surface [Pa]
@@ -275,7 +275,7 @@ contains
     real(r8), intent(in)                 :: co2_cpoint     ! CO2 compensation point at veg_tempk [Pa]
     real(r8), intent(out)                :: agross_layer   ! area-weighted gross photosynthesis for this layer [umolC/m2 leaf/s]
     real(r8), intent(out)                :: anet_layer     ! area-weighted net photosynthesis for this layer [umolC/m2 leaf/s]
-    real(r8), intent(out)                :: lai_layer      ! this layer's total leaf area index [m2 leaf/m2 ground]
+    real(r8), intent(out)                :: lai_layer      ! this layer's total leaf area index [m2 leaf/m2 crown footprint]
     integer,  intent(out), optional      :: solve_iter_sun ! Ci-solver iteration count, sunlit call, for callers tracking solver diagnostics
     integer,  intent(out), optional      :: solve_iter_sha ! Ci-solver iteration count, shaded call, for callers tracking solver diagnostics
 

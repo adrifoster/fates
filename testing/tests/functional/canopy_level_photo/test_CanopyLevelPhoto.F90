@@ -12,11 +12,17 @@ program FatesCanopyLevelPhoto
   ! for every sweep and every point.
   !
   ! The soil water content sweep does not vary btran directly. It sweeps a soil
-  ! water content fraction in [0, 1], maps it onto a soil matric potential, since 
-  ! these drivers have no soil texture from which a real retention curve could be built), 
-  ! and derives btran from that via BtranFromSMP, which is production's own 
-  ! EDBtranMod.F90::btran_ed formula specialized to the single unfrozen layer at 
+  ! water content fraction in [0, 1], maps it onto a soil matric potential, since
+  ! these drivers have no soil texture from which a real retention curve could be built),
+  ! and derives btran from that via BtranFromSMP, which is production's own
+  ! EDBtranMod.F90::btran_ed formula specialized to the single unfrozen layer at
   ! root fraction 1 these drivers assume
+  !
+  ! The prescribed canopy is a slab that fully covers its own footprint (light_env's 
+  ! single scattering element area = 1). The crown footprint is equal to patch area, 
+  ! and per-crown-area and per-ground-area fluxes are thus equal. The TwoStream solver 
+  ! returns fluxes in m2/crown footprint, but since this is equal to per m2 ground, 
+  ! that is what the units say
 
   use FatesConstantsMod,           only : r8 => fates_r8
   use FatesConstantsMod,           only : fates_unset_r8
@@ -44,9 +50,11 @@ program FatesCanopyLevelPhoto
   use LeafBiophysicsMod,           only : GetCanopyGasParameters
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestEnvironmentMod,     only : default_vpd, default_nscaler, default_par
+  use FatesTestEnvironmentMod,     only : default_veg_tempk
+  use FatesTestEnvironmentMod,     only : direct_frac, diffuse_frac
   use FatesTestEnvironmentMod,     only : BtranFromSMP, SoilMatricPotential
+  use FatesTestEnvironmentMod,     only : CanopyVaporPressure
   use FatesTestLightEnvMod,        only : light_env_type
-  use FatesTestLightEnvMod,        only : direct_frac, diffuse_frac
   use FatesTestLeafPhotoMod,       only : leaf_capacity_type
   use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
   use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
@@ -101,10 +109,10 @@ program FatesCanopyLevelPhoto
   real(r8), allocatable :: canopy_anet(:), canopy_agross(:)
   
   ! per-leaf-layer light profile at each prescribed LAI, (nlevleaf, n_lai)
-  real(r8), allocatable :: parsun_z_out(:,:)  ! absorbed PAR, sunlit [W/m2 ground]
-  real(r8), allocatable :: parsha_z_out(:,:)  ! absorbed PAR, shaded [W/m2 ground]
-  real(r8), allocatable :: laisun_z_out(:,:)  ! sunlit leaf area index [m2/m2]
-  real(r8), allocatable :: laisha_z_out(:,:)  ! shaded leaf area index [m2/m2]
+  real(r8), allocatable :: parsun_z_out(:,:)  ! absorbed PAR, sunlit [W/m2 crown footprint]
+  real(r8), allocatable :: parsha_z_out(:,:)  ! absorbed PAR, shaded [W/m2 crown footprint]
+  real(r8), allocatable :: laisun_z_out(:,:)  ! sunlit leaf area index [m2 leaf/m2 crown footprint]
+  real(r8), allocatable :: laisha_z_out(:,:)  ! shaded leaf area index [m2 leaf/m2 crown footprint]
   real(r8), allocatable :: nscaler_z_out(:,:) ! per-layer nitrogen-scaling factor [0-1]
   real(r8), allocatable :: anet_z_out(:,:)    ! per-layer area-weighted net photosynthesis [umolC/m2 leaf/s]
   integer,  allocatable :: nv_out(:)          ! number of occupied leaf layers at each prescribed LAI
@@ -123,7 +131,7 @@ program FatesCanopyLevelPhoto
   character(len=*), parameter :: out_file = 'canopy_level_photo_out.nc' ! output file
   
   ! sweep ranges
-  real(r8), parameter :: min_temp = 5.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
+  real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
   real(r8), parameter :: min_par  = 0.0_r8,    max_par  = 1600.0_r8,  par_inc  = 5.0_r8   ! [umol/m2/s]
   real(r8), parameter :: min_vpd  = 500.0_r8,  max_vpd  = 2500.0_r8,  vpd_inc  = 20.0_r8  ! [Pa] (0.5-2.5 kPa)
   real(r8), parameter :: min_co2  = 250.0_r8,  max_co2  = 1000.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
@@ -131,8 +139,8 @@ program FatesCanopyLevelPhoto
 
   ! prescribed canopy
   integer,  parameter :: n_lai = 3
-  real(r8), parameter :: lai_vals(n_lai) = [1.0_r8, 3.0_r8, 7.0_r8] ! prescribed leaf area index [m2 leaf/m2 ground]
-  real(r8), parameter :: canopy_sai    = 0.0_r8  ! prescribed stem area index [m2 stem/m2 ground]
+  real(r8), parameter :: lai_vals(n_lai) = [1.0_r8, 3.0_r8, 7.0_r8] ! prescribed in-crown leaf area index [m2 leaf/m2 crown footprint]
+  real(r8), parameter :: canopy_sai    = 0.0_r8  ! prescribed in-crown stem area index [m2 stem/m2 crown footprint]
   real(r8), parameter :: canopy_height = 20.0_r8 ! prescribed canopy height [m]
 
   ! illumination geometry
@@ -167,7 +175,7 @@ program FatesCanopyLevelPhoto
   kp25top = param_derived%kp25top(target_pft,1)
 
   ! set atmospheric defaults
-  call env%Init()
+  call env%Init(tempk=default_veg_tempk)
 
   ! ---------------------------------------------------------------------------------------
   ! resolve the within-canopy light profile at each prescribed LAI
@@ -238,7 +246,7 @@ program FatesCanopyLevelPhoto
   
   ! the standard reference condition's vapor-pressure state
   call QSat(env%tempk, env%can_press, qs_dummy, default_veg_esat)
-  default_can_vpress = default_veg_esat - default_vpd
+  default_can_vpress = CanopyVaporPressure(default_veg_esat)
   
   ! ---------------------------------------------------------------------
   ! Sweeps per LAI
@@ -290,7 +298,7 @@ program FatesCanopyLevelPhoto
     ! constant and can_vpress is derived directly from the swept VPD
     ! ---------------------------------------------------------------------
     do i = 1, n_vpd
-      can_vpress_byvpd(i) = default_veg_esat - vpd_vals(i)
+      can_vpress_byvpd(i) = CanopyVaporPressure(default_veg_esat, vpd=vpd_vals(i))
       call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s, &
         direct_frac, env%tempk, env%tempk, env%tempk, default_veg_esat,        &
         can_vpress_byvpd(i), env%can_co2_ppress, env%btran, vcmax25top,        &
@@ -304,7 +312,7 @@ program FatesCanopyLevelPhoto
     ! ---------------------------------------------------------------------
     do i = 1, n_temp
       call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
-      can_vpress_bytemp(i) = veg_esat_bytemp(i) - default_vpd
+      can_vpress_bytemp(i) = CanopyVaporPressure(veg_esat_bytemp(i))
       call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s, &
         direct_frac, temp_vals(i), env%tempk, env%tempk, veg_esat_bytemp(i),   &
         can_vpress_bytemp(i), env%can_co2_ppress, env%btran, vcmax25top,       &
@@ -346,7 +354,8 @@ contains
     ! DESCRIPTION:
     ! Integrates leaf photosynthesis down a canopy
     ! (light_env, holding this LAI's structure) to a canopy net assimilation
-    ! per unit ground area 
+    ! per unit crown footprint area - which is per unit ground area here only
+    ! because this canopy fully covers its footprint (see the program header)
     !
     ! Writes nothing except canopy_anet_out unless store_profile is set, in
     ! which case the per-layer diagnostics for column ilai_store of the
@@ -358,15 +367,15 @@ contains
     real(r8), intent(in)           :: par_toc           ! incident PAR at the top of the canopy [W/m2]
     real(r8), intent(in)           :: beam_frac         ! fraction of par_toc arriving as direct beam [0-1]
     real(r8), intent(in)           :: veg_tempk         ! instantaneous leaf temperature [K]
-    real(r8), intent(in)           :: t_growth          ! 10-day running-mean growth temperature [K] - held at the reference temperature by every sweep, see the call site
-    real(r8), intent(in)           :: t_home            ! long-term running-mean home temperature [K] - held at the reference temperature by every sweep, see the call site
+    real(r8), intent(in)           :: t_growth          ! 10-day running-mean growth temperature [K]
+    real(r8), intent(in)           :: t_home            ! long-term running-mean home temperature [K]
     real(r8), intent(in)           :: veg_esat          ! saturation vapor pressure at veg_tempk [Pa]
     real(r8), intent(in)           :: can_vpress        ! canopy air vapor pressure [Pa]
     real(r8), intent(in)           :: can_co2_ppress    ! CO2 partial pressure at the leaf surface [Pa]
     real(r8), intent(in)           :: btran             ! soil moisture stress factor [0-1]
     real(r8), intent(in)           :: vcmax25top        ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
-    real(r8), intent(out)          :: canopy_anet_out   ! canopy net photosynthesis [umolC/m2 ground/s]
-    real(r8), intent(out)          :: canopy_agross_out ! canopy gross photosynthesis [umolC/m2 ground/s]
+    real(r8), intent(out)          :: canopy_anet_out   ! canopy net photosynthesis [umolC/m2 crown footprint/s]
+    real(r8), intent(out)          :: canopy_agross_out ! canopy gross photosynthesis [umolC/m2 crown footprint/s]
     logical,  intent(in), optional :: store_profile     ! also fill the per-layer output arrays (default .false.)
     integer,  intent(in), optional :: ilai_store        ! output-array column to fill when store_profile is set
 
@@ -377,7 +386,7 @@ contains
     real(r8)                 :: co2_cpoint   ! Michaelis-Menten constant for CO2 compenstation point at veg_tempk [Pa]
     real(r8)                 :: agross_layer ! area-weighted gross photosynthesis for this layer [umolC/m2 leaf/s]
     real(r8)                 :: anet_layer   ! area-weighted net photosynthesis for this layer [umolC/m2 leaf/s]
-    real(r8)                 :: lai_layer    ! this layer's total leaf area index [m2 leaf/m2 ground]
+    real(r8)                 :: lai_layer    ! this layer's total leaf area index [m2 leaf/m2 crown footprint]
     logical                  :: do_store     ! resolved store_profile
     integer                  :: iv           ! leaf-layer looping index
     
@@ -412,7 +421,7 @@ contains
         co2_cpoint, agross_layer, anet_layer, lai_layer)
 
       ! scaled by this layer's leaf area index: [umolC/m2 leaf/s] *
-      ! [m2 leaf/m2 ground] -> [umolC/m2 ground/s]
+      ! [m2 leaf/m2 crown footprint] -> [umolC/m2 crown footprint/s].
       canopy_anet_out = canopy_anet_out + anet_layer * lai_layer
       canopy_agross_out = canopy_agross_out + agross_layer * lai_layer
 
@@ -466,24 +475,26 @@ contains
     call RegisterVarAtts(ncid, 'layer', dimIDs(1:1), type_int, '-',                     &
       'leaf layer index, 1 = top of canopy', layerID)
     call RegisterVarAtts(ncid, 'lai', dimIDs(2:2), type_double, 'm2 m-2',               &
-      'prescribed canopy leaf area index', laiID)
+      'prescribed in-crown canopy leaf area index', laiID)
     call RegisterVarAtts(ncid, 'nv', dimIDs(2:2), type_int, '-',                        &
       'number of occupied leaf layers at each prescribed LAI', nvID)
     call RegisterVarAtts(ncid, 'canopy_anet', dimIDs(2:2), type_double,                 &
       'umolC m-2 s-1',                                                                  &
-      'canopy net photosynthesis per unit ground area, at the reference condition',     &
+      'canopy net photosynthesis per unit crown footprint area (= per unit ground '//   &
+      'area, this canopy fully covering its footprint), at the reference condition',    &
       canopyanetID)
     call RegisterVarAtts(ncid, 'canopy_agross', dimIDs(2:2), type_double,               &
       'umolC m-2 s-1',                                                                  &
-      'canopy gross photosynthesis per unit ground area, at the reference condition',   &
+      'canopy gross photosynthesis per unit crown footprint area (= per unit ground '// &
+      'area, this canopy fully covering its footprint), at the reference condition',    &
       canopyagrossID)
 
     call RegisterVarAtts(ncid, 'parsun_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
-      'W m-2', 'absorbed PAR per unit ground area, sunlit leaves', parsunID,            &
+      'W m-2', 'absorbed PAR per unit crown footprint area, sunlit leaves', parsunID,   &
       coordinates='layer lai')
     call RegisterFillValue(ncid, parsunID, fates_unset_r8)
     call RegisterVarAtts(ncid, 'parsha_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
-      'W m-2', 'absorbed PAR per unit ground area, shaded leaves', parshaID,            &
+      'W m-2', 'absorbed PAR per unit crown footprint area, shaded leaves', parshaID,   &
       coordinates='layer lai')
     call RegisterFillValue(ncid, parshaID, fates_unset_r8)
     call RegisterVarAtts(ncid, 'laisun_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
@@ -526,7 +537,9 @@ contains
       '-', 'btran derived from each swept soil water content fraction',        &
       btranbysoilfracID)
 
-    ! canopy-integrated photosynthesis, per sweep and prescribed LAI
+    ! canopy-integrated photosynthesis, per sweep and prescribed LAI. All of
+    ! these are per unit crown footprint area, which is the same as per unit ground area
+    ! in this test only because the canopy fully covers its footprint
     call RegisterVarAtts(ncid, 'canopy_anet_bypar', (/dimIDs(3), dimIDs(2)/),  &
       type_double, 'umolC m-2 s-1', 'canopy net photosynthesis vs. PAR',       &
       anetbyparID, coordinates='par lai')

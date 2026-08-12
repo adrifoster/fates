@@ -39,7 +39,9 @@ program FatesTestLeafLevelPhoto
   use LeafBiophysicsMod,           only : QSat
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestEnvironmentMod,     only : default_vpd, default_nscaler, default_par
+  use FatesTestEnvironmentMod,     only : default_veg_tempk
   use FatesTestEnvironmentMod,     only : BtranFromSMP, SoilMatricPotential
+  use FatesTestEnvironmentMod,     only : CanopyVaporPressure
   use FatesTestLeafPhotoMod,       only : EvaluateLeafPhotosynthesis, LeafNitrogenContent
   use FatesUnitTestIOMod,          only : OpenNCFile, RegisterNCDims, CloseNCFile
   use FatesUnitTestIOMod,          only : WriteVar, RegisterVarAtts, EndNCDef
@@ -92,7 +94,7 @@ program FatesTestLeafLevelPhoto
   character(len=*), parameter :: out_file = 'leaf_level_photo_out.nc' ! output file
 
   ! sweep ranges
-  real(r8), parameter :: min_temp = 5.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
+  real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
   real(r8), parameter :: min_par  = 0.0_r8,    max_par  = 1600.0_r8,  par_inc  = 5.0_r8   ! [umol/m2/s]
   real(r8), parameter :: min_vpd  = 500.0_r8,  max_vpd  = 2500.0_r8,  vpd_inc  = 20.0_r8  ! [Pa] (0.5-2.5 kPa)
   real(r8), parameter :: min_co2  = 250.0_r8,  max_co2  = 1000.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
@@ -128,7 +130,7 @@ program FatesTestLeafLevelPhoto
   kp25top = param_derived%kp25top(target_pft,1)
 
   ! set atmospheric defaults
-  call env%Init()
+  call env%Init(tempk=default_veg_tempk)
 
   ! ---------------------------------------------------------------------------------------
   ! build the swept-value arrays
@@ -175,7 +177,7 @@ program FatesTestLeafLevelPhoto
 
   ! the standard reference condition's vapor-pressure state
   call QSat(env%tempk, env%can_press, qs_dummy, default_veg_esat)
-  default_can_vpress = default_veg_esat - default_vpd
+  default_can_vpress = CanopyVaporPressure(default_veg_esat)
 
   ! ---------------------------------------------------------------------
   ! PAR sweep
@@ -204,7 +206,7 @@ program FatesTestLeafLevelPhoto
   ! constant and can_vpress is derived directly from the swept VPD
   ! ---------------------------------------------------------------------
   do i = 1, n_vpd
-    can_vpress_byvpd(i) = default_veg_esat - vpd_vals(i)
+    can_vpress_byvpd(i) = CanopyVaporPressure(default_veg_esat, vpd=vpd_vals(i))
     call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
       env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
       env%can_o2_ppress, default_veg_esat, can_vpress_byvpd(i), env%gb,   &
@@ -219,7 +221,7 @@ program FatesTestLeafLevelPhoto
   ! ---------------------------------------------------------------------
   do i = 1, n_temp
     call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
-    can_vpress_bytemp(i) = veg_esat_bytemp(i) - default_vpd
+    can_vpress_bytemp(i) = CanopyVaporPressure(veg_esat_bytemp(i))
     call EvaluateLeafPhotosynthesis(target_pft, default_par, temp_vals(i),     &
       env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                 &
       env%can_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
