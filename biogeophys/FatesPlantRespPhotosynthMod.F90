@@ -83,6 +83,7 @@ module FATESPlantRespPhotosynthMod
 
   public :: FatesPlantRespPhotosynthDrive ! Called by the HLM-Fates interface
   public :: NonleafMaintenanceRespiration ! Live stem/coarse root/fine root MR - also usable standalone
+  public :: ConvertPar
 
   character(len=*), parameter, private :: sourcefile = &
        __FILE__

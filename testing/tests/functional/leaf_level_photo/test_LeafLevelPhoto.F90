@@ -56,6 +56,12 @@ program FatesTestLeafLevelPhoto
   real(r8)                      :: kp25top    ! top-of-canopy initial slope of C4 CO2 response at 25degC [umol/m2/s]
   real(r8)                      :: smpsc      ! soil matric potential at full stomatal closure [mm, negative]
   real(r8)                      :: smpso      ! soil matric potential at full stomatal opening [mm, negative]
+  
+  ! the shared default vapor-pressure state at the standard reference conditions
+  real(r8) :: default_veg_esat   ! saturation vapor pressure at default veg tempK [Pa]
+  real(r8) :: default_can_vpress ! canopy air vapor pressure at the default VPD [Pa]
+  real(r8) :: qs_dummy           ! saturation specific humidity output from QSat (unused here)
+  real(r8) :: smp                ! soil matric potential at a swept soil water content fraction [mm]
 
   ! swept-variable value arrays
   real(r8), allocatable :: par_vals(:)      ! swept PAR values [umol/m2/s]
@@ -167,93 +173,75 @@ program FatesTestLeafLevelPhoto
   allocate(anet_bytemp(n_temp), agross_bytemp(n_temp), gs_bytemp(n_temp), ci_bytemp(n_temp))
   allocate(anet_bysoilfrac(n_soilfrac), agross_bysoilfrac(n_soilfrac), gs_bysoilfrac(n_soilfrac), ci_bysoilfrac(n_soilfrac))
 
-  ! a shared default vapor-pressure state (leaf temperature and VPD both at
-  ! their defaults) - reused as the fixed background for every sweep except
-  ! the temperature and VPD sweeps themselves, which recompute it per point
-  block
-    real(r8) :: default_veg_esat, default_can_vpress
-    real(r8) :: qs_dummy ! saturation specific humidity output from QSat
-    real(r8) :: smp ! soil matric potential at a swept soil water content fraction [mm]
+  ! the standard reference condition's vapor-pressure state
+  call QSat(env%tempk, env%can_press, qs_dummy, default_veg_esat)
+  default_can_vpress = default_veg_esat - default_vpd
 
-    call QSat(env%tempk, env%can_press, qs_dummy, default_veg_esat)
-    default_can_vpress = default_veg_esat - default_vpd
+  ! ---------------------------------------------------------------------
+  ! PAR sweep
+  ! ---------------------------------------------------------------------
+  do i = 1, n_par
+    call EvaluateLeafPhotosynthesis(target_pft, par_vals(i), env%tempk,   &
+      env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
+      env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
+      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
+      kp25top, lnc_top, agross_bypar(i), anet_bypar(i), gs_bypar(i), ci_bypar(i))
+  end do
 
-    ! ---------------------------------------------------------------------
-    ! PAR sweep
-    ! ---------------------------------------------------------------------
-    print *, '----------------------------------------------------------------'
-    print *, 'Exercising leaf photosynthesis for PAR'
-    do i = 1, n_par
-      call EvaluateLeafPhotosynthesis(target_pft, par_vals(i), env%tempk,   &
-        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
-        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
-        kp25top, lnc_top, agross_bypar(i), anet_bypar(i), gs_bypar(i), ci_bypar(i))
-    end do
+  ! ---------------------------------------------------------------------
+  ! CO2 sweep
+  ! ---------------------------------------------------------------------
+  do i = 1, n_co2
+    call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
+      env%tempk, env%tempk, env%can_press, co2_vals(i),                   &
+      env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
+      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
+      kp25top, lnc_top, agross_byco2(i), anet_byco2(i), gs_byco2(i), ci_byco2(i))
+  end do
 
-    ! ---------------------------------------------------------------------
-    ! CO2 sweep
-    ! ---------------------------------------------------------------------
-    print *, '----------------------------------------------------------------'
-    print *, 'Exercising leaf photosynthesis for CO2'
-    do i = 1, n_co2
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
-        env%tempk, env%tempk, env%can_press, co2_vals(i),                   &
-        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
-        kp25top, lnc_top, agross_byco2(i), anet_byco2(i), gs_byco2(i), ci_byco2(i))
-    end do
+  ! ---------------------------------------------------------------------
+  ! VPD sweep - leaf temperature fixed at the default, so veg_esat is
+  ! constant and can_vpress is derived directly from the swept VPD
+  ! ---------------------------------------------------------------------
+  do i = 1, n_vpd
+    can_vpress_byvpd(i) = default_veg_esat - vpd_vals(i)
+    call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
+      env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
+      env%can_o2_ppress, default_veg_esat, can_vpress_byvpd(i), env%gb,   &
+      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
+      kp25top, lnc_top, agross_byvpd(i), anet_byvpd(i), gs_byvpd(i), ci_byvpd(i))
+  end do
 
-    ! ---------------------------------------------------------------------
-    ! VPD sweep - leaf temperature fixed at the default, so veg_esat is
-    ! constant and can_vpress is derived directly from the swept VPD
-    ! ---------------------------------------------------------------------
-    print *, '----------------------------------------------------------------'
-    print *, 'Exercising leaf photosynthesis for VPD'
-    do i = 1, n_vpd
-      can_vpress_byvpd(i) = default_veg_esat - vpd_vals(i)
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
-        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
-        env%can_o2_ppress, default_veg_esat, can_vpress_byvpd(i), env%gb,   &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
-        kp25top, lnc_top, agross_byvpd(i), anet_byvpd(i), gs_byvpd(i), ci_byvpd(i))
-    end do
+  ! ---------------------------------------------------------------------
+  ! leaf temperature sweep - t_growth/t_home held at the default leaf
+  ! temperature throughout; VPD held fixed at the default as
+  ! leaf temperature varies
+  ! ---------------------------------------------------------------------
+  do i = 1, n_temp
+    call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
+    can_vpress_bytemp(i) = veg_esat_bytemp(i) - default_vpd
+    call EvaluateLeafPhotosynthesis(target_pft, default_par, temp_vals(i),     &
+      env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                 &
+      env%can_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
+      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top,      &
+      kp25top, lnc_top, agross_bytemp(i), anet_bytemp(i), gs_bytemp(i), ci_bytemp(i))
+  end do
 
-    ! ---------------------------------------------------------------------
-    ! leaf temperature sweep - t_growth/t_home held at the default leaf
-    ! temperature throughout; VPD held fixed at the default as
-    ! leaf temperature varies
-    ! ---------------------------------------------------------------------
-    print *, '----------------------------------------------------------------'
-    print *, 'Exercising leaf photosynthesis for leaf temperature'
-    do i = 1, n_temp
-      call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
-      can_vpress_bytemp(i) = veg_esat_bytemp(i) - default_vpd
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, temp_vals(i),     &
-        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                 &
-        env%can_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
-        default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top,      &
-        kp25top, lnc_top, agross_bytemp(i), anet_bytemp(i), gs_bytemp(i), ci_bytemp(i))
-    end do
-
-    ! ---------------------------------------------------------------------
-    ! soil water content sweep - btran derived from the real smpsc/smpso
-    ! ramp at each swept fraction 
-    ! ---------------------------------------------------------------------
-    print *, '----------------------------------------------------------------'
-    print *, 'Exercising leaf photosynthesis for soil water content'
-    do i = 1, n_soilfrac
-      smp = SoilMatricPotential(soilfrac_vals(i), smpsc_pft)
-      btran_bysoilfrac(i) = BtranFromSMP(smp, smpsc_pft, smpso_pft)
-      call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,             &
-        env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                      &
-        env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,              &
-        default_nscaler, env%dayl_factor, btran_bysoilfrac(i), vcmax25top, jmax25top, &
-        kp25top, lnc_top, agross_bysoilfrac(i), anet_bysoilfrac(i), gs_bysoilfrac(i), &
-        ci_bysoilfrac(i))
-    end do
-  end block
-
+  ! ---------------------------------------------------------------------
+  ! soil water content sweep - btran derived from the real smpsc/smpso
+  ! ramp at each swept fraction 
+  ! ---------------------------------------------------------------------
+  do i = 1, n_soilfrac
+    smp = SoilMatricPotential(soilfrac_vals(i), smpsc)
+    btran_bysoilfrac(i) = BtranFromSMP(smp, smpsc, smpso)
+    call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,             &
+      env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                      &
+      env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,              &
+      default_nscaler, env%dayl_factor, btran_bysoilfrac(i), vcmax25top, jmax25top, &
+      kp25top, lnc_top, agross_bysoilfrac(i), anet_bysoilfrac(i), gs_bysoilfrac(i), &
+      ci_bysoilfrac(i))
+  end do
+  
   ! ---------------------------------------------------------------------------------------
   ! write output
   ! ---------------------------------------------------------------------------------------
@@ -277,7 +265,7 @@ contains
     integer              :: dimIDs(5)      ! dimension IDs
     integer              :: parID, co2ID, vpdID, tempID, soilfracID
     integer              :: vegesatbytempID, canvpressbytempID
-    integer              :: vegesatbyvpdID, canvpressbyvpdID
+    integer              :: canvpressbyvpdID
     integer              :: btranbysoilfracID
     integer              :: agrossbyparID, anetbyparID, gsbyparID, cibyparID
     integer              :: agrossbyco2ID, anetbyco2ID, gsbyco2ID, cibyco2ID
@@ -307,8 +295,6 @@ contains
     call RegisterVarAtts(ncid, 'can_vpress_bytemp', dimIDs(4:4), type_double, 'Pa',     &
       'canopy air vapor pressure at each swept leaf temperature, fixed default VPD',    &
       canvpressbytempID)
-    call RegisterVarAtts(ncid, 'veg_esat_byvpd', dimIDs(3:3), type_double, 'Pa',        &
-      'saturation vapor pressure at the fixed default leaf temperature', vegesatbyvpdID)
     call RegisterVarAtts(ncid, 'can_vpress_byvpd', dimIDs(3:3), type_double, 'Pa',      &
       'canopy air vapor pressure at each swept VPD, fixed default leaf temperature',    &
       canvpressbyvpdID)
@@ -323,7 +309,7 @@ contains
     call RegisterVarAtts(ncid, 'gs_bypar', (/dimIDs(1)/), type_double,       &
       'umol H2O m-2 s-1', 'stomatal conductance vs. PAR', gsbyparID,                    &
       coordinates='par pft')
-    call RegisterVarAtts(ncid, 'ci_bypar', (/dimIDs(1))/), type_double, 'Pa', &
+    call RegisterVarAtts(ncid, 'ci_bypar', (/dimIDs(1)/), type_double, 'Pa', &
       'intracellular CO2 vs. PAR', cibyparID, coordinates='par pft')
 
     call RegisterVarAtts(ncid, 'agross_byco2', (/dimIDs(2)/), type_double,   &
@@ -384,7 +370,6 @@ contains
 
     call WriteVar(ncid, vegesatbytempID, veg_esat_bytemp(:))
     call WriteVar(ncid, canvpressbytempID, can_vpress_bytemp(:))
-    call WriteVar(ncid, vegesatbyvpdID, veg_esat_byvpd(:))
     call WriteVar(ncid, canvpressbyvpdID, can_vpress_byvpd(:))
     call WriteVar(ncid, btranbysoilfracID, btran_bysoilfrac(:))
 

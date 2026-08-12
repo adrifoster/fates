@@ -86,7 +86,7 @@ class LeafLevelPhoto(FunctionalTest):
         ]
 
         for axis, varname, ylabel in panels:
-            values = data[varname].isel(pft=0).values  # (n_sweep,)
+            values = data[varname].values  # (n_sweep,)
             axis.plot(x, values, lw=1.2, color="tab:blue")
             cls._style_axis(axis)
             axis.set_xlabel(xlabel, fontsize=10)

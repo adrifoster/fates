@@ -1,41 +1,28 @@
 module FatesTestLightEnvMod
   !
   ! DESCRIPTION:
-  ! Prescribed light environment for standalone, patch-less/site-less test
-  ! drivers. Attenuates a prescribed incident PAR through a canopy's own leaf
-  ! layers using FATES's two-stream radiation solver (TwoStreamMLPEMod), with a
-  ! single scattering element (one canopy layer, one column, occupying 100% of its
-  ! own footprint) standing in for that canopy - no fates_patch_type/ed_site_type
-  ! is built or required.
-  !
-  ! Canopy structure enters as plain treelai/treesai/height scalars (Init/
-  ! Refresh), not a fates_cohort_type, so this serves both a cohort-driven
-  ! caller whose leaf area follows from allometry (test_SingleCohort.F90) and
-  ! one whose LAI is prescribed outright as an experimental treatment
-  ! (test_CanopyLevelPhoto.F90) - see Init's header comment.
+  ! Prescribed light environment for functional tests. Attenuates a prescribed incident 
+  ! PAR through a single canopy's own leaf layers using FATES's two-stream radiation solver (TwoStreamMLPEMod)
   !
   ! Reference full-sun PAR (at cosz=1) and the direct/diffuse split are
-  ! assumptions with no existing precedent elsewhere in the repo to draw from;
-  ! ground albedo is a typical soil/litter PAR value. The diurnal/annual cycle
-  ! itself - solar declination from day of year (Cooper 1969 single-term
-  ! sinusoidal approximation of Earth's obliquity, no eccentricity/perihelion
-  ! correction), and coszen(hour) from latitude and declination via the
-  ! standard hour-angle formula - follows real solar geometry, driven by the
-  ! site latitude prescribed in FatesTestSiteMod (shared with
-  ! FatesTestEnvironmentMod's temperature cycle, so both respond consistently
-  ! to a "different site" experiment).
+  ! assumptions. Ground albedo is a typical soil/litter PAR value.
+  !  
+  ! The diurnal/annual cycle is derived using solar declination from day of year 
+  ! (Cooper 1969 single-term sinusoidal approximation of Earth's obliquity, 
+  ! no eccentricity/perihelion correction), and coszen(hour) from latitude and declination 
+  ! via the standard hour-angle formula
   !
 
-  use FatesConstantsMod,   only : r8 => fates_r8
-  use FatesConstantsMod,   only : pi_const
-  use FatesConstantsMod,   only : rad_per_deg
-  use FatesConstantsMod,   only : wm2_to_umolm2s
-  use EDParamsMod,         only : GetNVegLayers
-  use FatesAllometryMod,   only : VegAreaLayer
+  use FatesConstantsMod,    only : r8 => fates_r8
+  use FatesConstantsMod,    only : pi_const
+  use FatesConstantsMod,    only : rad_per_deg
+  use FatesConstantsMod,    only : wm2_to_umolm2s
+  use EDParamsMod,          only : GetNVegLayers
+  use FatesAllometryMod,    only : VegAreaLayer
   use FatesRadiationMemMod, only : ivis
-  use TwoStreamMLPEMod,    only : twostream_type
-  use TwoStreamMLPEMod,    only : normalized_upper_boundary
-  use FatesTestSiteMod,    only : latitude_deg
+  use TwoStreamMLPEMod,     only : twostream_type
+  use TwoStreamMLPEMod,     only : normalized_upper_boundary
+  use FatesTestSiteMod,     only : latitude_deg
 
   implicit none
   private
@@ -43,28 +30,24 @@ module FatesTestLightEnvMod
   ! ------------------------------------------------------------------------------------
   ! PRESCRIBED LIGHT ENVIRONMENT ASSUMPTIONS
   ! ------------------------------------------------------------------------------------
-  real(r8), public, parameter :: ref_par_full_sun = 2000.0_r8/wm2_to_umolm2s ! reference full-sun incident PAR at cosz=1 [W/m2] (~2000 umol/m2/s)
-  ! public so a driver prescribing its own incident PAR outright (rather than
-  ! going through Profile's light-fraction/solar-cycle path) can reuse this
-  ! same clear-sky split instead of introducing a second, conflicting one -
-  ! see test_CanopyLevelPhoto.F90
-  real(r8), public, parameter :: direct_frac  = 0.85_r8  ! fraction of incident PAR that is direct beam (typical clear sky)
-  real(r8), public, parameter :: diffuse_frac = 1.0_r8 - direct_frac ! fraction of incident PAR that is diffuse
-  real(r8), parameter :: max_declin_deg    = 23.45_r8 ! Earth's obliquity, used as the declination amplitude (Cooper 1969) [deg]
-  real(r8), parameter :: ground_albedo_par = 0.10_r8  ! soil/litter PAR albedo (diffuse and beam)
-  real(r8), parameter :: frac_snow         = 0.0_r8   ! canopy snow-covered fraction (no snow)
-  real(r8), parameter :: snow_depth        = 0.0_r8   ! physical snow depth [m] (no snow)
+  real(r8), public, parameter :: ref_par_full_sun  = 1500.0_r8/wm2_to_umolm2s ! reference full-sun incident PAR at cosz=1 [W/m2] (~2000 umol/m2/s)
+  real(r8), public, parameter :: direct_frac       = 0.85_r8                  ! fraction of incident PAR that is direct beam (typical clear sky)
+  real(r8), public, parameter :: diffuse_frac      = 1.0_r8 - direct_frac     ! fraction of incident PAR that is diffuse
+  real(r8), parameter         :: max_declin_deg    = 23.45_r8                 ! Earth's obliquity, used as the declination amplitude (Cooper 1969) [deg]
+  real(r8), parameter         :: ground_albedo_par = 0.10_r8                  ! soil/litter PAR albedo (diffuse and beam)
+  real(r8), parameter         :: frac_snow         = 0.0_r8                   ! canopy snow-covered fraction (no snow)
+  real(r8), parameter         :: snow_depth        = 0.0_r8                   ! physical snow depth [m] (no snow)
 
   type, public :: light_env_type
 
      private
 
-     integer  :: pft            ! plant functional type index
-     integer  :: nv              ! number of occupied leaf layers
-     real(r8), public :: treelai         ! cached cohort total leaf area index [m2/m2]
-     real(r8) :: treesai         ! cached cohort total stem area index [m2/m2]
-     real(r8) :: height          ! cached cohort height [m]
-     type(twostream_type) :: twostr ! two-stream radiation object (one element)
+     integer              :: pft     ! plant functional type index
+     integer              :: nv      ! number of occupied leaf layers
+     real(r8), public     :: treelai ! saved cohort total leaf area index [m2/m2]
+     real(r8)             :: treesai ! saved cohort total stem area index [m2/m2]
+     real(r8)             :: height  ! saved cohort height [m]
+     type(twostream_type) :: twostr  ! two-stream radiation object (one element)
 
      real(r8), public, allocatable :: parsun_z(:) ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 ground]
      real(r8), public, allocatable :: parsha_z(:) ! absorbed PAR, shaded leaves, per leaf layer [W/m2 ground]
@@ -88,18 +71,9 @@ contains
   subroutine Init(this, treelai, treesai, height, pft)
     !
     ! DESCRIPTION:
-    ! Allocate the two-stream object for a single canopy, set up its single
+    ! Allocate the two-stream object for a canopy, set up its single
     ! scattering element and ground albedo, and allocate the per-leaf-layer arrays.
     !
-    ! Canopy structure is taken as plain scalars rather than a
-    ! fates_cohort_type: nothing in this module needs anything from a cohort
-    ! beyond treelai/treesai/height, and taking them directly is what lets a
-    ! driver with a PRESCRIBED canopy and no cohort at all
-    ! (test_CanopyLevelPhoto.F90, whose LAI is an experimental treatment
-    ! rather than an allometric consequence of a dbh) reuse this identical
-    ! two-stream attenuation rather than reimplementing it. A cohort-driven
-    ! caller simply passes cohort%treelai/treesai/height (see
-    ! test_SingleCohort.F90).
 
     ! ARGUMENTS:
     class(light_env_type),   intent(inout) :: this    ! light environment object
@@ -108,17 +82,17 @@ contains
     real(r8),                intent(in)    :: height  ! plant/canopy height [m]
     integer,                 intent(in)    :: pft     ! plant functional type index
 
-    this%pft     = pft
+    this%pft = pft
     this%treelai = treelai
     this%treesai = treesai
-    this%height  = height
-    this%nv      = GetNVegLayers(this%treelai + this%treesai)
+    this%height = height
+    this%nv = GetNVegLayers(this%treelai + this%treesai)
 
     call this%twostr%AllocInitTwoStream((/ivis/), 1, 1)
-    this%twostr%scelg(1,1)%pft  = this%pft
+    this%twostr%scelg(1,1)%pft = this%pft
     this%twostr%scelg(1,1)%area = 1.0_r8
-    this%twostr%scelg(1,1)%lai  = this%treelai
-    this%twostr%scelg(1,1)%sai  = this%treesai
+    this%twostr%scelg(1,1)%lai = this%treelai
+    this%twostr%scelg(1,1)%sai = this%treesai
     this%twostr%n_col(1) = 1
     call this%twostr%GetNSCel()
     this%twostr%band(ivis)%albedo_grnd_diff = ground_albedo_par
@@ -137,10 +111,7 @@ contains
     !
     ! DESCRIPTION:
     ! Re-sync the scattering element's canopy structure to the caller's current
-    ! treelai/treesai/height. The two-stream element was otherwise only ever built
-    ! once, at recruitment - this is the fix for crown structure silently going
-    ! stale once PRT allocation starts changing leaf area daily. Takes scalars
-    ! rather than a cohort, for the same reason Init does (see its header).
+    ! treelai/treesai/height.
 
     ! ARGUMENTS:
     class(light_env_type),   intent(inout) :: this    ! light environment object
@@ -169,6 +140,94 @@ contains
     end if
 
   end subroutine Refresh
+
+  ! ==========================================================================
+  
+  
+  subroutine AttenuateCanopy(this, par_beam, par_diff, coszen, parsun_z, parsha_z, laisun_z, laisha_z)
+    !
+    ! DESCRIPTION:
+    ! Attenuate given incident beam/diffuse PAR (par_beam/par_diff, at the given
+    ! coszen) through this canopy's leaf layers via the two-stream solver,
+    ! filling the caller-supplied parsun_z/parsha_z/laisun_z/laisha_z arrays
+
+    ! ARGUMENTS:
+    class(light_env_type),  intent(inout) :: this        ! light environment object
+    real(r8),               intent(in)    :: par_beam    ! direct-beam incident PAR at the top of the crown [W/m2]
+    real(r8),               intent(in)    :: par_diff    ! diffuse incident PAR at the top of the crown [W/m2]
+    real(r8),               intent(in)    :: coszen      ! cosine of the solar zenith angle to use for this solve [-1 to 1]; <=0 is treated as no incident PAR
+    real(r8),               intent(out)   :: parsun_z(:) ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 ground]
+    real(r8),               intent(out)   :: parsha_z(:) ! absorbed PAR, shaded leaves, per leaf layer [W/m2 ground]
+    real(r8),               intent(out)   :: laisun_z(:) ! sunlit LAI per leaf layer [m2/m2]
+    real(r8),               intent(out)   :: laisha_z(:) ! shaded LAI per leaf layer [m2/m2]
+
+    ! LOCALS:
+    real(r8) :: vai_top, vai_bot         ! vegetation area index bounds of the current leaf layer
+    real(r8) :: elai_layer, esai_layer   ! exposed leaf/stem area index of the current leaf layer
+    real(r8) :: Rb_abs, Rd_abs           ! total absorbed beam/diffuse radiation, current layer [W/m2 ground]
+    real(r8) :: Rb_abs_leaf, Rd_abs_leaf ! absorbed beam/diffuse radiation from leaves, current layer [W/m2 ground]
+    real(r8) :: R_abs_stem, R_abs_snow   ! absorbed radiation from stems/snow, current layer [W/m2 ground]
+    real(r8) :: leaf_sun_frac            ! sunlit fraction of leaf area in the current layer
+    real(r8) :: taulamb(2)               ! two-stream solve scratch space (size = 2*n_scel = 2)
+    real(r8) :: omega(2,2)               ! two-stream solve scratch space
+    real(r8) :: albedo_beam              ! two-stream solve outputs (unused diagnostics)
+    real(r8) :: albedo_diff, consv_err   ! two-stream solve outputs (unused diagnostics)
+    real(r8) :: frac_abs_beam            ! two-stream solve outputs (unused diagnostics)
+    real(r8) :: frac_abs_diff            ! two-stream solve outputs (unused diagnostics)
+    real(r8) :: frac_beam_grnd           ! two-stream solve outputs (unused diagnostics)
+    real(r8) :: frac_diff_grnd_beam      ! two-stream solve outputs (unused diagnostics)
+    real(r8) :: frac_diff_grnd_diff      ! two-stream solve outputs (unused diagnostics)
+    integer  :: ipiv(2)                  ! two-stream solve scratch space (LAPACK pivots)
+    integer  :: iv                       ! leaf-layer looping index
+    logical  :: call_fail                ! GetAbsRad failure flag
+
+    ! No incident PAR: skip the solve entirely rather than calling ZenithPrep with a
+    ! non-positive coszen, and treat all leaf area as shaded (there is no sun to
+    ! define a sunlit fraction against).
+    if (par_beam + par_diff <= 0.0_r8 .or. coszen <= 0.0_r8) then
+      parsun_z(:) = 0.0_r8
+      parsha_z(:) = 0.0_r8
+      laisun_z(:) = 0.0_r8
+      do iv = 1, this%nv
+        call VegAreaLayer(this%treelai, this%treesai, this%height, iv, this%nv,     &
+          this%pft, snow_depth, vai_top, vai_bot, elai_layer, esai_layer)
+        laisha_z(iv) = elai_layer
+      end do
+      return
+    end if
+
+    ! ZenithPrep + Solve are always run with the literal normalized boundary
+    ! (Rbeam_atm=Rdiff_atm=1) - Solve's internal energy-conservation check is
+    ! hardwired to that convention (FatesRadiationDriveMod.F90). 
+    ! This produces normalized scattering coefficients (per unit incident beam/diffuse) 
+    ! that do not themselves depend on the real light magnitude. The real incident PAR is 
+    ! applied afterward by assigning it directly to twostr%band(ivis)%Rbeam_atm/Rdiff_atm 
+    ! (bypassing Solve entirely for that step, mirroring FatesRadiationDriveMod),
+    ! which is what GetAbsRad actually reads to scale the normalized profile to
+    ! real absorbed radiation.
+    call this%twostr%ZenithPrep(coszen)
+    call this%twostr%Solve(ivis, normalized_upper_boundary, 1.0_r8, 1.0_r8,         &
+      taulamb, omega, ipiv, albedo_beam, albedo_diff, consv_err,                    &
+      frac_abs_beam, frac_abs_diff, frac_beam_grnd, frac_diff_grnd_beam,            &
+      frac_diff_grnd_diff)
+
+    this%twostr%band(ivis)%Rbeam_atm = par_beam
+    this%twostr%band(ivis)%Rdiff_atm = par_diff
+
+    do iv = 1, this%nv
+      call VegAreaLayer(this%treelai, this%treesai, this%height, iv, this%nv,       &
+        this%pft, snow_depth, vai_top, vai_bot, elai_layer, esai_layer)
+      call this%twostr%GetAbsRad(1, 1, ivis, vai_top, vai_bot, Rb_abs, Rd_abs,       &
+        Rd_abs_leaf, Rb_abs_leaf, R_abs_stem, R_abs_snow, leaf_sun_frac, call_fail)
+      ! per unit ground area, matching GetAbsRad's own convention and how
+      ! FatesPlantRespPhotosynthMod.F90 (par_per_sunla/par_per_shala) uses it
+      parsun_z(iv) = Rb_abs_leaf + Rd_abs_leaf*leaf_sun_frac
+      parsha_z(iv) = Rd_abs_leaf*(1.0_r8 - leaf_sun_frac)
+      laisun_z(iv) = elai_layer*leaf_sun_frac
+      laisha_z(iv) = elai_layer*(1.0_r8 - leaf_sun_frac)
+    end do
+
+  end subroutine AttenuateCanopy
 
   ! ==========================================================================
 
@@ -213,106 +272,6 @@ contains
       this%parsha_z, this%laisun_z, this%laisha_z)
 
   end subroutine Profile
-
-  ! ==========================================================================
-
-  subroutine AttenuateCanopy(this, par_beam, par_diff, coszen, parsun_z, parsha_z, laisun_z, laisha_z)
-    !
-    ! DESCRIPTION:
-    ! Attenuate given incident beam/diffuse PAR (par_beam/par_diff, at the given
-    ! coszen) through this cohort's own leaf layers via the two-stream solver,
-    ! filling the caller-supplied parsun_z/parsha_z/laisun_z/laisha_z arrays
-    ! (size this%nv). Factored out of Profile - which derives par_beam/par_diff
-    ! from (light_frac, day_of_year, hour_of_day) via the fixed direct_frac/
-    ! diffuse_frac split - so a diagnostic instantaneous light-response sweep
-    ! (an arbitrary incident PPFD, at an arbitrary beam/diffuse split and
-    ! coszen, independent of light_frac/day_of_year/hour_of_day) can reuse the
-    ! identical attenuation physics without touching this%parsun_z/parsha_z/
-    ! laisun_z/laisha_z at all - nothing to restore there. this%twostr's
-    ! internal solved state is still touched (ZenithPrep/Solve are not
-    ! side-effect-free), but Profile unconditionally re-solves it fresh on every
-    ! call regardless of what it was left at, so a caller that needs the real
-    ! per-substep state restored afterward should simply call Profile again with
-    ! the real light_frac/day_of_year/hour_of_day once done.
-
-    ! ARGUMENTS:
-    class(light_env_type), intent(inout) :: this        ! light environment object
-    real(r8),               intent(in)   :: par_beam     ! direct-beam incident PAR at the top of the crown [W/m2]
-    real(r8),               intent(in)   :: par_diff     ! diffuse incident PAR at the top of the crown [W/m2]
-    real(r8),               intent(in)   :: coszen       ! cosine of the solar zenith angle to use for this solve [-1 to 1]; <=0 is treated as no incident PAR
-    real(r8),               intent(out)  :: parsun_z(:)  ! absorbed PAR, sunlit leaves, per leaf layer [W/m2 ground]
-    real(r8),               intent(out)  :: parsha_z(:)  ! absorbed PAR, shaded leaves, per leaf layer [W/m2 ground]
-    real(r8),               intent(out)  :: laisun_z(:)  ! sunlit LAI per leaf layer [m2/m2]
-    real(r8),               intent(out)  :: laisha_z(:)  ! shaded LAI per leaf layer [m2/m2]
-
-    ! LOCALS:
-    real(r8) :: vai_top, vai_bot           ! vegetation area index bounds of the current leaf layer
-    real(r8) :: elai_layer, esai_layer     ! exposed leaf/stem area index of the current leaf layer
-    real(r8) :: Rb_abs, Rd_abs             ! total absorbed beam/diffuse radiation, current layer [W/m2 ground]
-    real(r8) :: Rb_abs_leaf, Rd_abs_leaf   ! absorbed beam/diffuse radiation from leaves, current layer [W/m2 ground]
-    real(r8) :: R_abs_stem, R_abs_snow     ! absorbed radiation from stems/snow, current layer [W/m2 ground]
-    real(r8) :: leaf_sun_frac              ! sunlit fraction of leaf area in the current layer
-    logical  :: call_fail                  ! GetAbsRad failure flag
-    real(r8) :: taulamb(2)     ! two-stream solve scratch space (size = 2*n_scel = 2)
-    real(r8) :: omega(2,2)     ! two-stream solve scratch space
-    integer  :: ipiv(2)        ! two-stream solve scratch space (LAPACK pivots)
-    real(r8) :: albedo_beam, albedo_diff, consv_err                      ! two-stream solve outputs (unused diagnostics)
-    real(r8) :: frac_abs_beam, frac_abs_diff                             ! two-stream solve outputs (unused diagnostics)
-    real(r8) :: frac_beam_grnd, frac_diff_grnd_beam, frac_diff_grnd_diff ! two-stream solve outputs (unused diagnostics)
-    integer  :: iv ! leaf-layer looping index
-
-    ! No incident PAR: skip the solve entirely rather than calling ZenithPrep with a
-    ! non-positive coszen, and treat all leaf area as shaded (there is no sun to
-    ! define a sunlit fraction against).
-    if (par_beam + par_diff <= 0.0_r8 .or. coszen <= 0.0_r8) then
-      parsun_z(:) = 0.0_r8
-      parsha_z(:) = 0.0_r8
-      laisun_z(:) = 0.0_r8
-      do iv = 1, this%nv
-        call VegAreaLayer(this%treelai, this%treesai, this%height, iv, this%nv,     &
-          this%pft, snow_depth, vai_top, vai_bot, elai_layer, esai_layer)
-        laisha_z(iv) = elai_layer
-      end do
-      return
-    end if
-
-    ! ZenithPrep + Solve are always run with the literal normalized boundary
-    ! (Rbeam_atm=Rdiff_atm=1) - Solve's internal energy-conservation check is
-    ! hardwired to that convention (see production usage at
-    ! FatesRadiationDriveMod.F90:170-183). This produces normalized scattering
-    ! coefficients (per unit incident beam/diffuse) that do not themselves depend on
-    ! the real light magnitude. The real incident PAR is applied afterward by
-    ! assigning it directly to twostr%band(ivis)%Rbeam_atm/Rdiff_atm (bypassing
-    ! Solve entirely for that step, mirroring FatesRadiationDriveMod.F90:363-364),
-    ! which is what GetAbsRad actually reads to scale the normalized profile to
-    ! real absorbed radiation.
-    call this%twostr%ZenithPrep(coszen)
-    call this%twostr%Solve(ivis, normalized_upper_boundary, 1.0_r8, 1.0_r8,         &
-      taulamb, omega, ipiv, albedo_beam, albedo_diff, consv_err,                    &
-      frac_abs_beam, frac_abs_diff, frac_beam_grnd, frac_diff_grnd_beam,            &
-      frac_diff_grnd_diff)
-
-    this%twostr%band(ivis)%Rbeam_atm = par_beam
-    this%twostr%band(ivis)%Rdiff_atm = par_diff
-
-    do iv = 1, this%nv
-      call VegAreaLayer(this%treelai, this%treesai, this%height, iv, this%nv,       &
-        this%pft, snow_depth, vai_top, vai_bot, elai_layer, esai_layer)
-      call this%twostr%GetAbsRad(1, 1, ivis, vai_top, vai_bot, Rb_abs, Rd_abs,       &
-        Rd_abs_leaf, Rb_abs_leaf, R_abs_stem, R_abs_snow, leaf_sun_frac, call_fail)
-      ! per unit GROUND area, matching GetAbsRad's own convention and how
-      ! FatesPlantRespPhotosynthMod.F90 (par_per_sunla/par_per_shala, ~line 668)
-      ! consumes it - NOT per unit leaf area. The per-leaf-area, W/m2->umol/m2/s
-      ! conversion for LeafLayerPhotosynthesis's par_abs happens later, at the
-      ! photosynthesis call site (see FatesPlantRespPhotosynthMod.F90's ConvertPar),
-      ! not here.
-      parsun_z(iv) = Rb_abs_leaf + Rd_abs_leaf*leaf_sun_frac
-      parsha_z(iv) = Rd_abs_leaf*(1.0_r8 - leaf_sun_frac)
-      laisun_z(iv) = elai_layer*leaf_sun_frac
-      laisha_z(iv) = elai_layer*(1.0_r8 - leaf_sun_frac)
-    end do
-
-  end subroutine AttenuateCanopy
 
   ! ==========================================================================
 

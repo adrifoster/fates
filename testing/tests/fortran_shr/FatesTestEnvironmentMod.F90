@@ -24,14 +24,14 @@ module FatesTestEnvironmentMod
   use FatesTestSiteMod,  only : t_diurnal_peak_hour
   use FatesTestSiteMod,  only : t_diurnal2_amp
   use FatesTestSiteMod,  only : t_diurnal2_peak_hour
-  use FatesTestSiteMod,  only : constant_vpd
+  
   implicit none
   private
 
   ! CONSTANTS:
-  integer,  parameter :: growth_window_days = 10 ! width of the T_growth running-mean window [days]
-  real(r8), parameter :: sea_level_press = 101325.0_r8 ! [Pa]
-  real(r8), parameter :: gb_well_ventilated = 2.0e6_r8 ! [umol/m2/s] (~20 s/m equivalent)
+  integer,  parameter :: growth_window_days = 10          ! width of the T_growth running-mean window [days]
+  real(r8), parameter :: sea_level_press    = 101325.0_r8 ! [Pa]
+  real(r8), parameter :: gb_well_ventilated = 2.0e6_r8    ! [umol/m2/s] (~20 s/m equivalent)
 
   ! shared reference-atmosphere defaults
   real(r8), public, parameter :: default_vpd         = 1000.0_r8   ! leaf-to-air VPD [Pa]
