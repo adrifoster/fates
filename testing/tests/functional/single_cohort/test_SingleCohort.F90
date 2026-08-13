@@ -54,7 +54,7 @@ program FatesSingleCohort
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesTestCohortPhysMod,      only : cohort_phys_type
-  use FatesTestHistoryMod,         only : history_type
+  use FatesSingleCohortHistoryMod, only : history_type
   use FatesTestLeafPhotoMod,       only : LeafNitrogenContent
   use LeafBiophysicsMod,           only : lb_params
   use LeafBiophysicsMod,           only : FvCB1980, medlyn_model
@@ -323,25 +323,12 @@ contains
             call hist%RecordLightProfile(iyear, ilight, cohort, light_env)
           end if
 
-          ! a single sub-daily carbon uptake step: leaf photosynthesis -> GPP and
-          ! leaf dark respiration, plus non-leaf maintenance respiration
+          ! sub-daily carbon uptake 
           call phys%SubdailyStep(cohort, pft, env, light_env, lnc_top, step_size,  &
             n_photo_calls, n_bisection_calls, max_solve_iter, sum_solve_iter,      &
             gpp_tstep, rdark_tstep, nonleaf_mr_tstep)
-
-          ! light interception efficiency (Sterck et al. 2013): whole-plant
-          ! absorbed PAR vs. absorbed PAR of an equal-leaf-area, zero-self-
-          ! shading reference surface, integrated over the day and taken as a
-          ! ratio once the day is done (below, with the par_absorptance
-          ! normalization applied there) - avoids a 0/0 division at night, when
-          ! both sums are simply 0. daily_absorbed_par_indiv (Onoda et al. 2013's
-          ! Phi) is accumulated alongside it, on a per-individual rather than
-          ! per-leaf-area basis: parsun_z/parsha_z are per m2 of the cohort's own
-          ! CROWN footprint, so multiplying by c_area recovers an absolute
-          ! W/cohort and dividing by n gives per individual - the same two-step
-          ! scaling gpp_tstep gets in FatesTestCohortPhysMod's SubdailyStep, and
-          ! the same one production uses in ScaleLeafLayerFluxToCohort. Note it
-          ! is crown area in m2 that does the work here, not a cover fraction
+          
+          ! accumulate metrics for light interception efficiency
           if (light_env%treelai > nearzero) then
             daily_absorbed_par = daily_absorbed_par +                              &
               sum(light_env%parsun_z(:) + light_env%parsha_z(:)) / light_env%treelai * step_size
@@ -350,29 +337,26 @@ contains
               sum(light_env%parsun_z(:) + light_env%parsha_z(:)) * cohort%c_area / cohort%n * step_size
           end if
 
-          ! instantaneous whole-plant light-response diagnostic: one snapshot per
-          ! year (first day, solar noon - matching RecordLightProfile's existing
-          ! annual cadence)
+          ! instantaneous whole-plant light-response
           if (iday == 1 .and. isubday == noon_substep) then
+            
+            ! calculate gross_assim and total_resp across the PPFD values
             call LightResponseSweep(cohort, pft, light_env, phys, env,           &
               diagnostic_ppfd, light_frac_val, iday, hour_of_day,                &
               diagnostic_gross_assim, diagnostic_total_resp)
+              
+            ! write to output
             call hist%RecordLightResponse(iyear, ilight, diagnostic_gross_assim, &
               diagnostic_total_resp)
 
-            ! leaf-level (LCPleaf) companion diagnostic - see leaf_lcp_layer's
-            ! declaration and LeafNetAssimSweep's header comment
+            ! leaf-level (LCPleaf) companion diagnostic
             call phys%LeafNetAssimSweep(pft, env, diagnostic_ppfd,               &
               leaf_lcp_layer, diagnostic_leaf_anet)
             call hist%RecordLeafNetAssim(iyear, ilight, diagnostic_leaf_anet)
           end if
 
           ! daily net carbon = GPP - leaf dark resp - non-leaf MR, integrated over
-          ! the sub-daily steps [kgC/indiv/day]. Net of growth respiration below,
-          ! this is what feeds PARTEH via cohort%npp_acc. The four terms making up
-          ! nonleaf_mr_tstep/rdark_tstep are also integrated separately below (not
-          ! netted) - cohort%livestem_mr/livecroot_mr/froot_mr were just set as a
-          ! side effect of SubdailyStep, for this same substep
+          ! the sub-daily steps [kgC/indiv/day]
           daily_net_c = daily_net_c + (gpp_tstep - rdark_tstep - nonleaf_mr_tstep) * step_size
           daily_gpp = daily_gpp + gpp_tstep * step_size
           daily_rdark = daily_rdark + rdark_tstep * step_size
@@ -382,43 +366,26 @@ contains
 
         end do
 
-        ! today's light interception efficiency - see the header comment above
-        ! the sub-daily loop, and par_absorptance's declaration, for why the
-        ! denominator carries the par_absorptance factor. daily_incident_par is
-        ! 0 only if there is no daylight at all today, which never happens at
-        ! this driver's latitude
+        ! calculate light interception efficiency
         if (daily_incident_par > nearzero) then
           light_intercept_eff = daily_absorbed_par / (daily_incident_par * par_absorptance)
         else
           light_intercept_eff = 0.0_r8
         end if
 
-        ! roll today's sub-daily tempk samples into the T_growth/T_home running
-        ! means (see FatesTestEnvironmentMod) - ready for tomorrow's photosynthetic
-        ! acclimation
+        ! calculate daily means of environmental variables
         call env%UpdateDailyMeans()
 
-        ! prescribed leaf-on/leaf-off phenology (cold-deciduous PFTs only) - runs
-        ! before the growth sequence below, matching EDMainMod.F90's relative
-        ! ordering (phenology, then PRTMaintTurnover/DailyPRT)
+        ! prescribed leaf-on/leaf-off phenology (cold-deciduous PFTs only)
         call DailyPhenology(cohort, pft, iday)
 
-        ! the daily growth sequence (NSC/PRT allocation) and carbon starvation
-        ! mortality - kept as a single flat subroutine; see its header comment
+        ! the daily growth sequence and carbon starvation mortality
         call DailyGrowthAndMortality(cohort, daily_net_c, frac_store,            &
           npp_acc_to_prt, cmort, growth_resp, leaf_turnover, fnrt_turnover,      &
           sapw_turnover, struct_turnover)
 
         ! refresh crown area, treelai/treesai/nv, and the light environment's
-        ! canopy structure to reflect today's growth - ready for tomorrow's
-        ! photosynthesis, and needed here so today's output row (below) reflects
-        ! today's growth consistently. carea_allom is otherwise only ever called
-        ! once, at cohort creation (FatesFactoryMod's CohortFactory) - production
-        ! only recomputes it as part of patch-level canopy structure
-        ! (EDCanopyStructureMod), which this patch-less driver has no equivalent
-        ! of. Without this call, cohort%c_area - and the leaf-area scaling of
-        ! gpp_tstep that depends on it - would silently stay frozen at the
-        ! recruitment-size crown area for the entire multi-year run
+        ! canopy structure to reflect today's growth
         call carea_allom(cohort%dbh, cohort%n, site_spread, pft,         &
           cohort%crowndamage, cohort%c_area)
         call UpdateCohortLAI(cohort, can_tlai, patch_area)
@@ -444,9 +411,7 @@ contains
 
     ! this light level's whole-trajectory Ci-solver summary - mean iteration
     ! count and bisection-fallback count, over every LeafLayerPhotosynthesis
-    ! call across all n_days_total days (not a daily quantity: with ~2 calls
-    ! per leaf layer per substep, a per-day mean would be noisy and not
-    ! particularly informative on its own)
+    ! call across all n_days_total days
     mean_solve_iter = real(sum_solve_iter, r8) / real(n_photo_calls, r8)
     call hist%RecordLightLevelSummary(ilight, mean_solve_iter, n_bisection_calls)
 
@@ -463,39 +428,43 @@ contains
   subroutine DailyPhenology(cohort, pft, day_of_year)
     !
     ! DESCRIPTION:
-    ! Prescribed cold-deciduous (ihard_season_decid) leaf-on/leaf-off phenology,
-    ! reusing production's actual carbon mechanics - allometric targets (bleaf/
-    ! bfineroot/bsap_allom/bagw_allom/bbgw_allom/bdead_allom) and the storage
-    ! flush/tissue drop physics (PRTPhenologyFlush/PRTDeciduousTurnover) - lifted
-    ! from EDPhysiologyMod.F90's phenology_leafonoff (its per-cohort body, which
-    ! needs no patch/site state beyond the site-level elongation factor and cold
-    ! status this driver doesn't have). Those two site-level inputs are replaced
-    ! here by a direct day-of-year comparison against prescribed leaf_on_doy/
-    ! leaf_off_doy, which is what buys independence from that routine's GDD/
-    ! chilling-day tracking (currentSite%cstatus in the production version).
-    ! Evergreen and drought-deciduous PFTs (ihard_stress_decid/isemi_stress_decid
-    ! - meaningless here anyway with btran permanently non-limiting) are
-    ! untouched, matching their existing always-fully-flushed behavior.
+    ! Prescribed cold-deciduous (ihard_season_decid) leaf-on/leaf-off phenology
 
     ! ARGUMENTS:
     type(fates_cohort_type), intent(inout) :: cohort      ! cohort to update
-    integer,                  intent(in)    :: pft         ! plant functional type index
-    integer,                  intent(in)    :: day_of_year ! day of year [1-365]
+    integer,                  intent(in)   :: pft         ! plant functional type index
+    integer,                  intent(in)   :: day_of_year ! day of year [1-365]
 
     ! LOCALS:
-    logical  :: is_leaf_on_season ! true on days within [leaf_on_doy, leaf_off_doy)
-    logical  :: is_flushing_time  ! true only on the day leaves transition off -> on
-    logical  :: is_shedding_time  ! true only on the day leaves transition on -> off
-    real(r8) :: elong_factor_today ! today's leaf elongation factor [0 or 1]
-    real(r8) :: leaf_c, fnrt_c, sapw_c, struct_c, store_c ! current tissue carbon [kgC]
-    real(r8) :: leaf_deficit_c, fnrt_deficit_c, sapw_deficit_c, struct_deficit_c, total_deficit_c ! flush-time carbon deficits relative to target [kgC]
-    real(r8) :: eff_leaf_drop_fraction, eff_fnrt_drop_fraction ! shed-time drop fractions [0-1]
-    real(r8) :: eff_sapw_drop_fraction, eff_struct_drop_fraction ! shed-time drop fractions [0-1]
-    real(r8) :: target_leaf_c, target_fnrt_c, target_sapw_c ! target tissue carbon at today's elongation factor [kgC]
-    real(r8) :: target_agw_c, target_bgw_c, target_struct_c ! target tissue carbon at today's elongation factor [kgC]
-    real(r8) :: sapw_area          ! unused diagnostic output of bsap_allom [m2]
-    real(r8) :: store_c_transfer_frac ! fraction of storage carbon transferred to flush tissues [-]
-    real(r8), parameter :: carbon_store_buffer = 0.10_r8 ! matches phenology_leafonoff's identical local constant - leaves this fraction of storage untouched by a flush, to avoid triggering carbon-starvation mortality from a single flush event
+    real(r8) :: elong_factor_today       ! today's leaf elongation factor [0 or 1]
+    real(r8) :: leaf_c                   ! current leaf carbon [kgC]
+    real(r8) :: fnrt_c                   ! current fineroot carbon [kgC]
+    real(r8) :: sapw_c                   ! current sapwood carbon [kgC]
+    real(r8) :: struct_c                 ! current structural carbon [kgC]
+    real(r8) :: store_c                  ! current storage carbon [kgC]
+    real(r8) :: leaf_deficit_c           ! leaf flush-time carbon deficit relative to target [kgC]
+    real(r8) :: fnrt_deficit_c           ! fineroot flush-time carbon deficit relative to target [kgC]
+    real(r8) :: sapw_deficit_c           ! sapwood flush-time carbon deficit relative to target [kgC]
+    real(r8) :: struct_deficit_c         ! structural flush-time carbon deficit relative to target [kgC]
+    real(r8) :: total_deficit_c          ! total flush-time carbon deficit relative to target [kgC]
+    real(r8) :: eff_leaf_drop_fraction   ! leaf shed-time drop fractions [0-1]
+    real(r8) :: eff_fnrt_drop_fraction   ! fineroot shed-time drop fractions [0-1]
+    real(r8) :: eff_sapw_drop_fraction   ! sapwood shed-time drop fraction [0-1]
+    real(r8) :: eff_struct_drop_fraction ! structural shed-time drop fraction [0-1]
+    real(r8) :: target_leaf_c            ! target leaf carbon at today's elongation factor [kgC]
+    real(r8) :: target_fnrt_c            ! target fineroot carbon at today's elongation factor [kgC]
+    real(r8) :: target_sapw_c            ! target sapwood carbon at today's elongation factor [kgC]
+    real(r8) :: target_agw_c             ! target aboveground carbon at today's elongation factor [kgC]
+    real(r8) ::  target_bgw_c            ! target belowground carbon at today's elongation factor [kgC]
+    real(r8) :: target_struct_c          ! target structural carbon at today's elongation factor [kgC]
+    real(r8) :: sapw_area                ! unused diagnostic output of bsap_allom [m2]
+    real(r8) :: store_c_transfer_frac    ! fraction of storage carbon transferred to flush tissues [-]
+    logical  :: is_leaf_on_season        ! true on days within [leaf_on_doy, leaf_off_doy)
+    logical  :: is_flushing_time         ! true only on the day leaves transition off -> on
+    logical  :: is_shedding_time         ! true only on the day leaves transition on -> off
+  
+    ! CONSTANTS:
+    real(r8), parameter :: carbon_store_buffer = 0.10_r8 ! matches phenology_leafonoff's identical local constant
 
     if (prt_params%phen_leaf_habit(pft) /= ihard_season_decid) return
 
@@ -505,7 +474,7 @@ contains
     is_flushing_time = is_leaf_on_season .and. (cohort%status_coh == leaves_off)
     is_shedding_time = (.not. is_leaf_on_season) .and. (cohort%status_coh == leaves_on) .and. &
       (cohort%dbh > EDPftvarcon_inst%phen_cold_size_threshold(pft) .or.          &
-       prt_params%woody(pft) == itrue)
+      prt_params%woody(pft) == itrue)
 
     ! elongation factors always track today's phenological season, independent of
     ! whether today is a transition day - matches phenology_leafonoff's
@@ -518,11 +487,11 @@ contains
 
     ! target tissue carbon at today's elongation factor - only actually consumed
     ! below, so (unlike phenology_leafonoff) only computed on a transition day
-    call bleaf(cohort%dbh, pft, cohort%crowndamage, cohort%canopy_trim,          &
+    call bleaf(cohort%dbh, pft, cohort%crowndamage, cohort%canopy_trim,        &
       cohort%efleaf_coh, target_leaf_c)
     call bfineroot(cohort%dbh, pft, cohort%canopy_trim, cohort%l2fr,            &
       cohort%effnrt_coh, target_fnrt_c)
-    call bsap_allom(cohort%dbh, pft, cohort%crowndamage, cohort%canopy_trim,     &
+    call bsap_allom(cohort%dbh, pft, cohort%crowndamage, cohort%canopy_trim,    &
       cohort%efstem_coh, sapw_area, target_sapw_c)
     call bagw_allom(cohort%dbh, pft, cohort%crowndamage, cohort%efstem_coh,      &
       target_agw_c)
@@ -531,7 +500,6 @@ contains
 
     if (is_flushing_time) then
       cohort%status_coh = leaves_on
-
       store_c = cohort%prt%GetState(store_organ, carbon12_element)
       if (store_c > nearzero) then
         leaf_c   = cohort%prt%GetState(leaf_organ,   carbon12_element)
@@ -566,14 +534,14 @@ contains
     if (is_shedding_time) then
       cohort%status_coh = leaves_off
 
-      leaf_c   = cohort%prt%GetState(leaf_organ,   carbon12_element)
-      fnrt_c   = cohort%prt%GetState(fnrt_organ,   carbon12_element)
-      sapw_c   = cohort%prt%GetState(sapw_organ,   carbon12_element)
+      leaf_c = cohort%prt%GetState(leaf_organ,   carbon12_element)
+      fnrt_c = cohort%prt%GetState(fnrt_organ,   carbon12_element)
+      sapw_c = cohort%prt%GetState(sapw_organ,   carbon12_element)
       struct_c = cohort%prt%GetState(struct_organ, carbon12_element)
 
-      eff_leaf_drop_fraction   = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_leaf_c/max(leaf_c, nearzero)))
-      eff_fnrt_drop_fraction   = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_fnrt_c/max(fnrt_c, nearzero)))
-      eff_sapw_drop_fraction   = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_sapw_c/max(sapw_c, nearzero)))
+      eff_leaf_drop_fraction = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_leaf_c/max(leaf_c, nearzero)))
+      eff_fnrt_drop_fraction = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_fnrt_c/max(fnrt_c, nearzero)))
+      eff_sapw_drop_fraction = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_sapw_c/max(sapw_c, nearzero)))
       eff_struct_drop_fraction = max(0.0_r8, min(1.0_r8, 1.0_r8 - target_struct_c/max(struct_c, nearzero)))
 
       call PRTDeciduousTurnover(cohort%prt, pft, leaf_organ, eff_leaf_drop_fraction)
@@ -600,59 +568,43 @@ contains
     ! self-shading physics as the real light environment
     ! (light_env%AttenuateCanopy), recording whole-plant gross assimilation and
     ! total respiration at each swept PPFD via phys%GrossAssimAndResp - without
-    ! advancing any state. This is a separate calculation from the daily/
-    ! sub-daily loop (which only produces daily integrals): unlike Profile/
-    ! SubdailyStep, it writes nothing to cohort, phys, or env.
+    ! advancing any state. This is a separate calculation from the daily/sub-daily loop
     !
     ! Illumination defaults to pure diffuse (all incident PPFD as diffuse, no
     ! direct beam) - matching Sterck et al. (2013)'s definition of light
     ! interception efficiency, the comparison target for this diagnostic.
     ! use_beam_illumination switches to the opposite extreme (all incident
     ! PPFD as direct beam at zenith) so the two can be compared. Sun-angle
-    ! geometry is fixed at coszen=1 (sun directly overhead) regardless of the
-    ! illumination mode or the real solar geometry for day_of_year/hour_of_day
-    ! - with pure diffuse illumination coszen is nearly inert anyway (it only
-    ! enters via the two-stream diffuse-radiation streams' own internal
-    ! integration over sky angles, not a cosine projection the way beam
-    ! radiation uses it), but fixing it regardless decouples the response
-    ! curve's shape from whatever declination/hour a particular diagnostic day
-    ! happens to fall on, so curves from different diagnostic days are
-    ! directly comparable and differ only via the cohort's own physiological/
-    ! canopy state. A realistic-seasonal-sun-angle option is deliberately not
-    ! offered - it would reintroduce exactly the confound this frozen-cohort,
-    ! fixed-geometry design exists to remove.
-    !
-    ! AttenuateCanopy is called into local parsun_z/parsha_z/laisun_z/laisha_z
-    ! here, never into light_env's own persistent per-substep state, so that is
-    ! never perturbed. light_env%twostr's internal solved state is still
-    ! touched by each sweep step (ZenithPrep/Solve are not side-effect-free) -
-    ! restored at the end by calling light_env%Profile with the real
-    ! (light_frac_val, day_of_year, hour_of_day), which unconditionally
-    ! re-solves it fresh regardless of what it was left at.
+    ! geometry is fixed at coszen=1 (sun directly overhead)
 
     ! ARGUMENTS:
     type(fates_cohort_type), intent(in)    :: cohort         ! cohort to diagnose (frozen - read-only)
-    integer,                  intent(in)    :: pft             ! plant functional type index
-    type(light_env_type),    intent(inout) :: light_env       ! this light level's light environment (mutated only transiently; restored before return)
-    type(cohort_phys_type),  intent(in)    :: phys            ! today's already-computed leaf physiology (frozen - read-only)
-    type(environment_type),  intent(in)    :: env             ! prescribed atmospheric/soil boundary conditions (frozen - read-only)
-    real(r8),                 intent(in)    :: ppfd_values(:)  ! incident PPFD values to sweep, at the top of the crown [umol/m2/s]
-    real(r8),                 intent(in)    :: light_frac_val  ! this light level's real incident light fraction [0-1] - used only to restore light_env afterward
-    integer,                  intent(in)    :: day_of_year     ! real day of year [1-365] - used only to restore light_env afterward
-    real(r8),                 intent(in)    :: hour_of_day     ! real hour of day [0-24] - used only to restore light_env afterward
-    real(r8),                 intent(out)   :: gross_assim(:)  ! whole-plant gross assimilation at each swept PPFD [kgC/indiv/s], size(ppfd_values)
-    real(r8),                 intent(out)   :: total_resp(:)   ! whole-plant total respiration at each swept PPFD [kgC/indiv/s], size(ppfd_values)
-    logical,                  intent(in), optional :: use_beam_illumination ! if true, sweep with all incident PPFD as direct beam at zenith instead of the default pure diffuse (Sterck et al. 2013)
+    type(light_env_type),    intent(inout) :: light_env      ! this light level's light environment (mutated only transiently; restored before return)
+    type(cohort_phys_type),  intent(in)    :: phys           ! today's already-computed leaf physiology (frozen - read-only)
+    type(environment_type),  intent(in)    :: env            ! prescribed atmospheric/soil boundary conditions (frozen - read-only)
+    real(r8),                intent(in)    :: ppfd_values(:) ! incident PPFD values to sweep, at the top of the crown [umol/m2/s]
+    real(r8),                intent(in)    :: light_frac_val ! this light level's real incident light fraction [0-1] - used only to restore light_env afterward
+    real(r8),                intent(in)    :: hour_of_day    ! real hour of day [0-24] - used only to restore light_env afterward
+    integer,                 intent(in)    :: pft            ! plant functional type index
+    integer,                 intent(in)    :: day_of_year    ! real day of year [1-365] - used only to restore light_env afterward
+    real(r8),                intent(out)   :: gross_assim(:) ! whole-plant gross assimilation at each swept PPFD [kgC/indiv/s], size(ppfd_values)
+    real(r8),                intent(out)   :: total_resp(:)  ! whole-plant total respiration at each swept PPFD [kgC/indiv/s], size(ppfd_values)
+    logical,                 intent(in), optional :: use_beam_illumination ! if true, sweep with all incident PPFD as direct beam at zenith instead of the default pure diffuse (Sterck et al. 2013)
 
     ! LOCALS:
-    real(r8), parameter :: sweep_coszen = 1.0_r8 ! fixed sun-angle geometry for the sweep (sun directly overhead) - see header comment
-    logical  :: use_beam ! resolved value of use_beam_illumination (defaults to false: pure diffuse)
-    real(r8), allocatable :: parsun_z(:), parsha_z(:), laisun_z(:), laisha_z(:) ! this sweep step's attenuated PAR profile - local, never light_env%parsun_z etc.
-    real(r8) :: par_toc  ! this sweep step's total incident PAR at the top of the crown [W/m2]
-    real(r8) :: par_beam ! this sweep step's direct-beam incident PAR at the top of the crown [W/m2]
-    real(r8) :: par_diff ! this sweep step's diffuse incident PAR at the top of the crown [W/m2]
-    integer  :: ippfd   ! PPFD-sweep looping index
+    real(r8), allocatable :: parsun_z(:) ! this sweep step's attenuated PAR profile (sun)
+    real(r8), allocatable :: parsha_z(:) ! this sweep step's attenuated PAR profile (shade) 
+    real(r8), allocatable :: laisun_z(:) ! this sweep step's lai profile (sun) 
+    real(r8), allocatable :: laisha_z(:) ! this sweep step's lai profile (shade) 
+    real(r8)              :: par_toc     ! this sweep step's total incident PAR at the top of the crown [W/m2]
+    real(r8)              :: par_beam    ! this sweep step's direct-beam incident PAR at the top of the crown [W/m2]
+    real(r8)              :: par_diff    ! this sweep step's diffuse incident PAR at the top of the crown [W/m2]
+    integer               :: ippfd       ! PPFD-sweep looping index
+    logical               :: use_beam    ! resolved value of use_beam_illumination (defaults to false: pure diffuse)
 
+    ! CONSTANTS:
+    real(r8), parameter :: sweep_coszen = 1.0_r8 ! fixed sun-angle geometry for the sweep (sun directly overhead)
+  
     use_beam = .false.
     if (present(use_beam_illumination)) use_beam = use_beam_illumination
 
@@ -690,57 +642,42 @@ contains
     sapw_turnover, struct_turnover)
     !
     ! DESCRIPTION:
-    ! The daily growth sequence (NSC update / PRT allocation, once per day after
-    ! the sub-daily loop, matching EDMainMod.F90's daily dynamics sequence) followed
-    ! by carbon starvation mortality (lifted from EDMortalityFunctionsMod.F90's
-    ! mortality_rates). Deliberately kept as a single flat subroutine, not
-    ! decomposed further or hidden behind a type: the call order below is the thing
-    ! this driver exists to make explicit.
+    ! The daily growth sequence followed by carbon starvation mortality
 
     ! ARGUMENTS:
-    type(fates_cohort_type), intent(inout) :: cohort         ! cohort to grow and apply mortality to
-    real(r8),                 intent(in)    :: daily_net_c    ! today's net carbon (GPP - leaf Rd - nonleaf MR) [kgC/indiv/day]
-    real(r8),                 intent(in)    :: frac_store     ! storage carbon / target leaf carbon, computed pre-growth at the top of today's loop [-]
-    real(r8),                 intent(out)   :: npp_acc_to_prt ! carbon balance handed to PARTEH (net of growth respiration) [kgC/indiv/day]
-    real(r8),                 intent(out)   :: cmort          ! carbon starvation mortality rate [indiv/year]
-    real(r8),                 intent(out)   :: growth_resp    ! today's growth respiration [kgC/indiv/day]
-    real(r8),                 intent(out)   :: leaf_turnover   ! today's leaf turnover loss, from PRTMaintTurnover [kgC/indiv/day]
-    real(r8),                 intent(out)   :: fnrt_turnover   ! today's fine root turnover loss, from PRTMaintTurnover [kgC/indiv/day]
-    real(r8),                 intent(out)   :: sapw_turnover   ! today's sapwood turnover loss, from PRTMaintTurnover [kgC/indiv/day]
-    real(r8),                 intent(out)   :: struct_turnover ! today's structural turnover loss, from PRTMaintTurnover [kgC/indiv/day]
+    type(fates_cohort_type), intent(inout) :: cohort          ! cohort to grow and apply mortality to
+    real(r8),                 intent(in)   :: daily_net_c     ! today's net carbon (GPP - leaf Rd - nonleaf MR) [kgC/indiv/day]
+    real(r8),                 intent(in)   :: frac_store      ! storage carbon / target leaf carbon, computed pre-growth at the top of today's loop [-]
+    real(r8),                 intent(out)  :: npp_acc_to_prt  ! carbon balance handed to PARTEH (net of growth respiration) [kgC/indiv/day]
+    real(r8),                 intent(out)  :: cmort           ! carbon starvation mortality rate [indiv/year]
+    real(r8),                 intent(out)  :: growth_resp     ! today's growth respiration [kgC/indiv/day]
+    real(r8),                 intent(out)  :: leaf_turnover   ! today's leaf turnover loss, from PRTMaintTurnover [kgC/indiv/day]
+    real(r8),                 intent(out)  :: fnrt_turnover   ! today's fine root turnover loss, from PRTMaintTurnover [kgC/indiv/day]
+    real(r8),                 intent(out)  :: sapw_turnover   ! today's sapwood turnover loss, from PRTMaintTurnover [kgC/indiv/day]
+    real(r8),                 intent(out)  :: struct_turnover ! today's structural turnover loss, from PRTMaintTurnover [kgC/indiv/day]
 
     ! LOCALS:
-    real(r8) :: resp_g_acc              ! growth respiration: a tax on the positive part of daily_net_c [kgC/indiv/day], matches EDMainMod.F90's resp_g_acc_hold (without that field's day/year unit round-trip, since it cancels out)
-    real(r8) :: delta_dbh, delta_height ! unused outputs of EvaluateAndCorrectDBH (it corrects cohort%dbh/height in place; these report how much it moved them)
-    real(r8) :: leaf_c_before, fnrt_c_before, sapw_c_before, struct_c_before ! tissue carbon immediately before PRTMaintTurnover [kgC/indiv] - PRTMaintTurnover has no flux-reporting output of its own, so turnover loss is captured as the state change it causes
+    real(r8) :: resp_g_acc      ! growth respiration: a tax on the positive part of daily_net_c [kgC/indiv/day]
+    real(r8) :: delta_dbh       ! unused output of EvaluateAndCorrectDBH
+    real(r8) :: delta_height    ! unused output of EvaluateAndCorrectDBH
+    real(r8) :: leaf_c_before   ! leaf carbon immediately before PRTMaintTurnover [kgC/indiv]
+    real(r8) :: fnrt_c_before   ! fineroot carbon immediately before PRTMaintTurnover [kgC/indiv]
+    real(r8) :: sapw_c_before   ! sapwood carbon immediately before PRTMaintTurnover [kgC/indiv]
+    real(r8) :: struct_c_before ! structural carbon immediately before PRTMaintTurnover [kgC/indiv]
 
     ! ---------------------------------------------------------------------
-    ! NSC update / PRT allocation - once per day, after the sub-daily loop,
-    ! matching EDMainMod.F90's daily dynamics sequence
+    ! NSC update / PRT allocation - once per day, after the sub-daily loop
     ! ---------------------------------------------------------------------
 
     ! growth respiration: a tax on the positive part of today's net carbon
-    ! (matches EDMainMod.F90's resp_g_acc_hold, which additionally round-trips
-    ! through an annual-equivalent "hold" value for I/O - that cancels out
-    ! algebraically and is skipped here since this driver has no such
-    ! diagnostic)
     resp_g_acc = prt_params%grperc(pft) * max(0.0_r8, daily_net_c)
     growth_resp = resp_g_acc
 
-    ! the actual carbon_balance boundary condition PARTEH reads (see
-    ! FatesCohortMod.F90's InitPRTBoundaryConditions, which registers
-    ! cohort%npp_acc as ac_bc_inout_id_netdc) - net of growth respiration.
-    ! Captured into npp_acc_to_prt for output before DailyPRT decrements
-    ! cohort%npp_acc in place as it allocates
+    ! carbon_balance boundary condition
     cohort%npp_acc = daily_net_c - resp_g_acc
     npp_acc_to_prt = cohort%npp_acc
 
     ! maintenance turnover moves senesced tissue mass to storage/litter
-    ! before allocation replaces it (phase 1, below). is_drought = .false.
-    ! always: this driver's evergreen PFT with non-limiting soil moisture
-    ! (btran=1) never triggers phenological drought status. PRTMaintTurnover
-    ! reports no flux of its own, so per-organ turnover loss is captured here
-    ! as the pool-state change it causes
     leaf_c_before = cohort%prt%GetState(leaf_organ, carbon12_element)
     fnrt_c_before = cohort%prt%GetState(fnrt_organ, carbon12_element)
     sapw_c_before = cohort%prt%GetState(sapw_organ, carbon12_element)
@@ -753,8 +690,6 @@ contains
     call cohort%prt%AgeLeaves(pft, cohort%canopy_layer, sec_per_day)
 
     ! correct dbh if structural carbon has drifted from what's allometrically
-    ! consistent (integration error correction) - this driver never damages
-    ! the crown, so EDMainMod.F90's "newly_recovered" skip never applies here
     call EvaluateAndCorrectDBH(cohort, delta_dbh, delta_height)
 
     ! phase 1: replace turnover losses (from storage if npp_acc < 0); phase 2:
@@ -778,11 +713,8 @@ contains
     cohort%npp_acc = 0.0_r8
 
     ! ---------------------------------------------------------------------
-    ! carbon starvation mortality - lifted from EDMortalityFunctionsMod.F90's
-    ! mortality_rates (the cmort block only; background/hydraulic/freezing/
-    ! senescence/damage mortality are not implemented here). Deliberately
-    ! uses frac_store as computed at the top of today's loop (pre-growth),
-    ! matching production's Mortality_Derivative, which runs before
+    ! carbon starvation mortality. Uses frac_store as computed at the top of today's loop 
+    ! (pre-growth), matching production's Mortality_Derivative, which runs before
     ! PRTMaintTurnover/DailyPRT using the previous day's storage state
     ! ---------------------------------------------------------------------
     select case (hlm_mort_cstarvation_model)
@@ -806,7 +738,7 @@ contains
     ! stepped by 1/days_per_year - matches EDMainMod.F90's
     ! cohort%n = max(0, n + dndt*hlm_freq_day). No disturbance mechanism
     ! exists in this patch-less driver, so the full rate is applied directly
-    ! to n (see the header comment above)
+    ! to n 
     cohort%n = max(0.0_r8, cohort%n * (1.0_r8 - cmort/real(days_per_year, r8)))
 
   end subroutine DailyGrowthAndMortality

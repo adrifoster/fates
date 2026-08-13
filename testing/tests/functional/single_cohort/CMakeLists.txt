@@ -1,4 +1,4 @@
-set(test_sources test_SingleCohort.F90 FatesTestHistoryMod.F90)
+set(test_sources test_SingleCohort.F90 FatesSingleCohortHistoryMod.F90)
 
 set(NETCDF_C_DIR ${NETCDF_C_PATH})
 set(NETCDF_FORTRAN_DIR ${NETCDF_F_PATH})
