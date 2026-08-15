@@ -100,13 +100,14 @@ program FatesSingleCohort
   real(r8),                    parameter :: ppfd_diagnostic_max = 2000.0_r8 ! highest swept PPFD [umol/m2/s] (~full sun)
   integer,                     parameter :: leaf_lcp_layer = 1              ! canopy layer swept for the leaf-level (LCPleaf) diagnostic
   integer,                     parameter :: days_per_year = 365             ! days per simulated year
-  integer,                     parameter :: n_substeps_per_day = 24         ! sub-daily steps per day (hourly)
-  integer,                     parameter :: nyears = 10                     ! number of years to simulate
+  integer,                     parameter :: n_substeps_per_day = 48         ! sub-daily steps per day (half-hourly), must be even
+  integer,                     parameter :: nyears = 50                     ! number of years to simulate
   
   ! timing calculations
   real(r8), parameter :: step_size = 86400.0_r8/n_substeps_per_day ! model time step [s]
+  real(r8), parameter :: hrs_per_substep = 24.0_r8/n_substeps_per_day ! sub-daily step length [h]
   integer,  parameter :: n_days_total = nyears * days_per_year     ! total days per light level's trajectory
-  integer,  parameter :: noon_substep = n_substeps_per_day/2 + 1   ! sub-daily index nearest solar noon (hour 12.5 of 24 hourly substeps)
+  integer,  parameter :: noon_substep = n_substeps_per_day/2 + 1   ! sub-daily index nearest solar noon (first sample after noon)
 
   ! read in parameter file name from command line
   param_file = command_line_arg(1)
@@ -196,7 +197,7 @@ program FatesSingleCohort
 
   ! write out the daily whole-cohort time series and the annual light-profile
   ! snapshot, both across the light sweep
-  call hist%Write(out_file, light_frac, diagnostic_ppfd)
+  call hist%WriteVals(out_file, light_frac, diagnostic_ppfd)
 
 contains
 
@@ -218,6 +219,7 @@ contains
     type(light_env_type)             :: light_env                                 ! prescribed light environment for this light level
     type(cohort_phys_type)           :: phys                                      ! per-leaf-layer photosynthetic capacity/leaf physics
     real(r8)                         :: diagnostic_gross_assim(n_ppfd_diagnostic) ! one year's gross-assimilation output for the light response curve [kgC/indiv/s]
+    real(r8)                         :: diagnostic_leaf_resp(n_ppfd_diagnostic)   ! one year's leaf dark respiration output for the light response curve[kgC/indiv/s]
     real(r8)                         :: diagnostic_total_resp(n_ppfd_diagnostic)  ! one year's total-respiration output for the light response curve[kgC/indiv/s]
     real(r8)                         :: diagnostic_leaf_anet(n_ppfd_diagnostic)   ! one year's leaf-level net-photosynthesis output for the light response curve [umolC/m2 leaf/s]
     real(r8)                         :: hour_of_day                               ! hour of day at the midpoint of the current substep [0-24]
@@ -306,8 +308,8 @@ contains
 
         do isubday = 1, n_substeps_per_day
 
-          ! hourly environmental variables (temperature, VPD, light, etc.)
-          hour_of_day = real(isubday, r8) - 0.5_r8
+          ! sub-daily environmental variables (temperature, VPD, light, etc.)
+          hour_of_day = (real(isubday, r8) - 0.5_r8) * hrs_per_substep
           call env%SetHour(iday, hour_of_day)
           
           ! get par
@@ -343,11 +345,11 @@ contains
             ! calculate gross_assim and total_resp across the PPFD values
             call LightResponseSweep(cohort, pft, light_env, phys, env,           &
               diagnostic_ppfd, light_frac_val, iday, hour_of_day,                &
-              diagnostic_gross_assim, diagnostic_total_resp)
+              diagnostic_gross_assim, diagnostic_leaf_resp, diagnostic_total_resp)
               
             ! write to output
             call hist%RecordLightResponse(iyear, ilight, diagnostic_gross_assim, &
-              diagnostic_total_resp)
+              diagnostic_leaf_resp, diagnostic_total_resp)
 
             ! leaf-level (LCPleaf) companion diagnostic
             call phys%LeafNetAssimSweep(pft, env, diagnostic_ppfd,               &
@@ -396,7 +398,7 @@ contains
           daily_rdark, daily_livestem_mr, daily_livecroot_mr, daily_froot_mr,      &
           growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,                &
           struct_turnover, npp_acc_to_prt, frac_store, cmort,                      &
-          light_intercept_eff, maintresp_reduction_factor,                        &
+          light_intercept_eff, maintresp_reduction_factor, daily_incident_par,     &
           daily_absorbed_par_indiv, env)
 
       end do
@@ -557,7 +559,7 @@ contains
   ! ==========================================================================
 
   subroutine LightResponseSweep(cohort, pft, light_env, phys, env, ppfd_values, &
-    light_frac_val, day_of_year, hour_of_day, gross_assim, total_resp,          &
+    light_frac_val, day_of_year, hour_of_day, gross_assim, leaf_resp, total_resp, &
     use_beam_illumination)
     !
     ! DESCRIPTION:
@@ -589,6 +591,7 @@ contains
     integer,                 intent(in)    :: day_of_year    ! real day of year [1-365] - used only to restore light_env afterward
     real(r8),                intent(out)   :: gross_assim(:) ! whole-plant gross assimilation at each swept PPFD [kgC/indiv/s], size(ppfd_values)
     real(r8),                intent(out)   :: total_resp(:)  ! whole-plant total respiration at each swept PPFD [kgC/indiv/s], size(ppfd_values)
+    real(r8),                intent(out)   :: leaf_resp(:)   ! leaf dark respiration at each swept PPFD [kgC/indiv/s], size(ppfd_values)
     logical,                 intent(in), optional :: use_beam_illumination ! if true, sweep with all incident PPFD as direct beam at zenith instead of the default pure diffuse (Sterck et al. 2013)
 
     ! LOCALS:
@@ -622,8 +625,13 @@ contains
       end if
       call light_env%AttenuateCanopy(par_beam, par_diff, sweep_coszen,          &
         parsun_z, parsha_z, laisun_z, laisha_z)
-      call phys%GrossAssimAndResp(cohort, pft, env, parsun_z, parsha_z,        &
-        laisun_z, laisha_z, 1.0_r8, step_size, gross_assim(ippfd), total_resp(ippfd))
+        
+      ! maintance respiration factor is set to 1.0 here; we want these outputs to be 
+      ! properties of the plant's size and physiology rather than of how storage-depleted 
+      ! it happened to be that day.
+      call phys%GrossAssimAndResp(cohort, pft, env, parsun_z, parsha_z,              &
+        laisun_z, laisha_z, 1.0_r8, step_size, gross_assim(ippfd), leaf_resp(ippfd), &
+        total_resp(ippfd))
     end do
 
     deallocate(parsun_z, parsha_z, laisun_z, laisha_z)

@@ -305,62 +305,62 @@ contains
 
     call RegisterVarAtts(ncid, 'agross_bypar', (/dimIDs(1)/), type_double,   &
       'umolC m-2 s-1', 'gross photosynthesis vs. PAR', agrossbyparID,                   &
-      coordinates='par pft')
+      coordinates='par')
     call RegisterVarAtts(ncid, 'anet_bypar', (/dimIDs(1)/), type_double,     &
-      'umolC m-2 s-1', 'net photosynthesis vs. PAR', anetbyparID, coordinates='par pft')
+      'umolC m-2 s-1', 'net photosynthesis vs. PAR', anetbyparID, coordinates='par')
     call RegisterVarAtts(ncid, 'gs_bypar', (/dimIDs(1)/), type_double,       &
       'umol H2O m-2 s-1', 'stomatal conductance vs. PAR', gsbyparID,                    &
-      coordinates='par pft')
+      coordinates='par')
     call RegisterVarAtts(ncid, 'ci_bypar', (/dimIDs(1)/), type_double, 'Pa', &
-      'intracellular CO2 vs. PAR', cibyparID, coordinates='par pft')
+      'intracellular CO2 vs. PAR', cibyparID, coordinates='par')
 
     call RegisterVarAtts(ncid, 'agross_byco2', (/dimIDs(2)/), type_double,   &
       'umolC m-2 s-1', 'gross photosynthesis vs. CO2', agrossbyco2ID,                   &
-      coordinates='co2 pft')
+      coordinates='co2')
     call RegisterVarAtts(ncid, 'anet_byco2', (/dimIDs(2)/), type_double,     &
-      'umolC m-2 s-1', 'net photosynthesis vs. CO2', anetbyco2ID, coordinates='co2 pft')
+      'umolC m-2 s-1', 'net photosynthesis vs. CO2', anetbyco2ID, coordinates='co2')
     call RegisterVarAtts(ncid, 'gs_byco2', (/dimIDs(2)/), type_double,       &
       'umol H2O m-2 s-1', 'stomatal conductance vs. CO2', gsbyco2ID,                    &
-      coordinates='co2 pft')
+      coordinates='co2')
     call RegisterVarAtts(ncid, 'ci_byco2', (/dimIDs(2)/), type_double, 'Pa', &
-      'intracellular CO2 vs. CO2', cibyco2ID, coordinates='co2 pft')
+      'intracellular CO2 vs. CO2', cibyco2ID, coordinates='co2')
 
     call RegisterVarAtts(ncid, 'agross_byvpd', (/dimIDs(3)/), type_double,   &
       'umolC m-2 s-1', 'gross photosynthesis vs. VPD', agrossbyvpdID,                   &
-      coordinates='vpd pft')
+      coordinates='vpd')
     call RegisterVarAtts(ncid, 'anet_byvpd', (/dimIDs(3)/), type_double,     &
-      'umolC m-2 s-1', 'net photosynthesis vs. VPD', anetbyvpdID, coordinates='vpd pft')
+      'umolC m-2 s-1', 'net photosynthesis vs. VPD', anetbyvpdID, coordinates='vpd')
     call RegisterVarAtts(ncid, 'gs_byvpd', (/dimIDs(3)/), type_double,       &
       'umol H2O m-2 s-1', 'stomatal conductance vs. VPD', gsbyvpdID,                    &
-      coordinates='vpd pft')
+      coordinates='vpd')
     call RegisterVarAtts(ncid, 'ci_byvpd', (/dimIDs(3)/), type_double, 'Pa', &
-      'intracellular CO2 vs. VPD', cibyvpdID, coordinates='vpd pft')
+      'intracellular CO2 vs. VPD', cibyvpdID, coordinates='vpd')
 
     call RegisterVarAtts(ncid, 'agross_bytemp', (/dimIDs(4)/), type_double,  &
       'umolC m-2 s-1', 'gross photosynthesis vs. leaf temperature', agrossbytempID,     &
-      coordinates='temperature pft')
+      coordinates='temperature')
     call RegisterVarAtts(ncid, 'anet_bytemp', (/dimIDs(4)/), type_double,    &
       'umolC m-2 s-1', 'net photosynthesis vs. leaf temperature', anetbytempID,         &
-      coordinates='temperature pft')
+      coordinates='temperature')
     call RegisterVarAtts(ncid, 'gs_bytemp', (/dimIDs(4)/), type_double,      &
       'umol H2O m-2 s-1', 'stomatal conductance vs. leaf temperature', gsbytempID,      &
-      coordinates='temperature pft')
+      coordinates='temperature')
     call RegisterVarAtts(ncid, 'ci_bytemp', (/dimIDs(4)/), type_double,      &
       'Pa', 'intracellular CO2 vs. leaf temperature', cibytempID,                       &
-      coordinates='temperature pft')
+      coordinates='temperature')
 
     call RegisterVarAtts(ncid, 'agross_bysoilfrac', (/dimIDs(5)/),           &
       type_double, 'umolC m-2 s-1', 'gross photosynthesis vs. soil water content',      &
-      agrossbysoilfracID, coordinates='soilfrac pft')
+      agrossbysoilfracID, coordinates='soilfrac')
     call RegisterVarAtts(ncid, 'anet_bysoilfrac', (/dimIDs(5)/),             &
       type_double, 'umolC m-2 s-1', 'net photosynthesis vs. soil water content',        &
-      anetbysoilfracID, coordinates='soilfrac pft')
+      anetbysoilfracID, coordinates='soilfrac')
     call RegisterVarAtts(ncid, 'gs_bysoilfrac', (/dimIDs(5)/), type_double,  &
       'umol H2O m-2 s-1', 'stomatal conductance vs. soil water content',                &
-      gsbysoilfracID, coordinates='soilfrac pft')
+      gsbysoilfracID, coordinates='soilfrac')
     call RegisterVarAtts(ncid, 'ci_bysoilfrac', (/dimIDs(5)/), type_double,  &
       'Pa', 'intracellular CO2 vs. soil water content', cibysoilfracID,                 &
-      coordinates='soilfrac pft')
+      coordinates='soilfrac')
 
     call EndNCDef(ncid)
 

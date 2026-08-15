@@ -279,8 +279,9 @@ contains
 
   ! ==========================================================================
 
-  subroutine GrossAssimAndResp(this, cohort, pft, env, parsun_z, parsha_z,       &
-    laisun_z, laisha_z, maintresp_reduction_factor, step_size, gross_assim, total_resp)
+  subroutine GrossAssimAndResp(this, cohort, pft, env, parsun_z, parsha_z,   &
+    laisun_z, laisha_z, maintresp_reduction_factor, step_size, gross_assim,  &
+    leaf_resp, total_resp)
     !
     ! DESCRIPTION:
     ! Whole-plant gross assimilation and total respiration (leaf dark + non-leaf
@@ -298,6 +299,7 @@ contains
     real(r8),                 intent(in)  :: laisha_z(:) ! shaded LAI per leaf layer [m2 leaf/m2 crown footprint]
     real(r8),                 intent(in)  :: step_size   ! model time step [s]
     real(r8),                 intent(out) :: gross_assim ! whole-plant gross assimilation at this PAR profile [kgC/indiv/s]
+    real(r8),                 intent(out) :: leaf_resp   ! leaf dark respiration at this PAR profile [kgC/indiv/s]
     real(r8),                 intent(out) :: total_resp  ! whole-plant total respiration (leaf dark + non-leaf maintenance) at this PAR profile [kgC/indiv/s]
     real(r8),                 intent(in)  :: maintresp_reduction_factor  ! storage-based factor on maintenance respiration [0-1]
     integer,                  intent(in)  :: pft         ! plant functional type index
@@ -317,8 +319,8 @@ contains
       this%fnrt_n, maintresp_reduction_factor, step_size,                 &
       livestem_mr, livecroot_mr, froot_mr, sym_nfix_tstep)
 
-    total_resp = leaf_resp_sum * umolC_to_kgC * maintresp_reduction_factor / cohort%n + &
-      livestem_mr + livecroot_mr + froot_mr
+    leaf_resp  = leaf_resp_sum * umolC_to_kgC * maintresp_reduction_factor / cohort%n
+    total_resp = leaf_resp + livestem_mr + livecroot_mr + froot_mr
 
   end subroutine GrossAssimAndResp
 

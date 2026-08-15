@@ -67,6 +67,7 @@ module FatesSingleCohortHistoryMod
   real(r8), allocatable :: light_intercept_eff(:,:)        ! light interception efficiency [-]
   real(r8), allocatable :: maintresp_reduction_factor(:,:) ! storage-based maintenance-respiration throttle [0-1]
   real(r8), allocatable :: daily_absorbed_par_indiv(:,:)   ! whole-plant absorbed PAR per individual, integrated over the day [J indiv-1 day-1]
+  real(r8), allocatable :: daily_incident_par(:,:)         ! incident PAR at the top of the crown, integrated over the day [J m-2 crown footprint day-1]
   integer,  allocatable :: nv(:,:)                         ! number of occupied leaf+stem layers [-]
 
   ! daily environmental forcing, dimensioned (time), identical across light levels
@@ -92,6 +93,7 @@ module FatesSingleCohortHistoryMod
 
   ! instantaneous light-response diagnostic, dimensioned (ppfd, year, light_level)
   real(r8), allocatable :: gross_assim(:,:,:) ! whole-plant gross assimilation [kgC/indiv/s]
+  real(r8), allocatable :: leaf_resp(:,:,:)  ! whole-plant leaf dark respiration [kgC/indiv/s]
   real(r8), allocatable :: total_resp(:,:,:)  ! whole-plant total respiration (leaf dark + non-leaf maintenance) [kgC/indiv/s]
   real(r8), allocatable :: leaf_anet(:,:,:)   ! leaf-level net photosynthesis (Aarea), single canopy layer, no canopy attenuation (Sterck et al. 2013's LCPleaf diagnostic) [umolC/m2 leaf/s]
   
@@ -156,7 +158,9 @@ contains
     allocate(this%n(n_time, n_light))
     allocate(this%light_intercept_eff(n_time, n_light))
     allocate(this%daily_absorbed_par_indiv(n_time, n_light))
+    allocate(this%daily_incident_par(n_time, n_light))
     allocate(this%gross_assim(n_ppfd, n_year, n_light))
+    allocate(this%leaf_resp(n_ppfd, n_year, n_light))
     allocate(this%total_resp(n_ppfd, n_year, n_light))
     allocate(this%leaf_anet(n_ppfd, n_year, n_light))
 
@@ -174,6 +178,9 @@ contains
     allocate(this%t_growth(n_time))
     allocate(this%t_home(n_time))
     allocate(this%n_vpress_constrained(n_time))
+    
+    allocate(this%frac_store(n_time, n_light))
+    allocate(this%cmort(n_time, n_light))
 
     ! only allocate in reduced_output mode
     if (.not. this%reduced_output) then
@@ -193,8 +200,6 @@ contains
       allocate(this%sapw_turnover(n_time, n_light))
       allocate(this%struct_turnover(n_time, n_light))
       allocate(this%npp_acc(n_time, n_light))
-      allocate(this%frac_store(n_time, n_light))
-      allocate(this%cmort(n_time, n_light))
       allocate(this%maintresp_reduction_factor(n_time, n_light))
       allocate(this%parsun_z(n_leaf, n_year, n_light))
       allocate(this%parsha_z(n_leaf, n_year, n_light))
@@ -214,7 +219,7 @@ contains
     daily_rdark, daily_livestem_mr, daily_livecroot_mr, daily_froot_mr,        &
     daily_growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,            &
     struct_turnover, npp_acc, frac_store, cmort, light_intercept_eff,          &
-    maintresp_reduction_factor, daily_absorbed_par_indiv, env)
+    maintresp_reduction_factor, daily_incident_par, daily_absorbed_par_indiv, env)
     !
     ! DESCRIPTION:
     ! Capture one day's daily time series, optionally skip some if we are doing
@@ -242,6 +247,7 @@ contains
     real(r8),                intent(in)    :: cmort                      ! carbon starvation mortality rate [indiv/year]
     real(r8),                intent(in)    :: light_intercept_eff        ! light interception efficiency [-]
     real(r8),                intent(in)    :: maintresp_reduction_factor ! storage-based maintenance-respiration throttle [0-1]
+    real(r8),                intent(in)    :: daily_incident_par         ! incident PAR [J m-2 crown footprint day-1] 
     real(r8),                intent(in)    :: daily_absorbed_par_indiv   ! whole-plant absorbed PAR per individual [J indiv-1 day-1]
 
     ! daily environmental forcing
@@ -266,7 +272,10 @@ contains
     this%storage_c(iday_all, ilight) = cohort%prt%GetState(store_organ, carbon12_element)
     this%n(iday_all, ilight) = cohort%n
     this%light_intercept_eff(iday_all, ilight) = light_intercept_eff
+    this%daily_incident_par(iday_all, ilight) = daily_incident_par
     this%daily_absorbed_par_indiv(iday_all, ilight) = daily_absorbed_par_indiv
+    this%frac_store(iday_all, ilight) = frac_store
+    this%cmort(iday_all, ilight) = cmort
 
     ! only save if we are not doing reduced_output
     if (.not. this%reduced_output) then
@@ -286,8 +295,6 @@ contains
       this%struct_turnover(iday_all, ilight) = struct_turnover
       this%daily_gpp(iday_all, ilight) = daily_gpp
       this%npp_acc(iday_all, ilight) = npp_acc
-      this%frac_store(iday_all, ilight) = frac_store
-      this%cmort(iday_all, ilight) = cmort
       this%maintresp_reduction_factor(iday_all, ilight) = maintresp_reduction_factor
     end if
 
@@ -320,7 +327,7 @@ contains
 
   ! ==========================================================================
 
-  subroutine RecordLightResponse(this, iyear, ilight, gross_assim, total_resp)
+  subroutine RecordLightResponse(this, iyear, ilight, gross_assim, leaf_resp, total_resp)
     !
     ! DESCRIPTION:
     ! Capture the instantaneous whole-plant light-response diagnostic for the given year 
@@ -331,9 +338,11 @@ contains
     integer,             intent(in)    :: iyear          ! simulated year index (1..n_year)
     integer,             intent(in)    :: ilight         ! light-level index
     real(r8),            intent(in)    :: gross_assim(:) ! whole-plant gross assimilation at each swept PPFD [kgC/indiv/s], size(n_ppfd)
+    real(r8),            intent(in)    :: leaf_resp(:)   ! whole-plant leaf dark respiration at each swept PPFD [kgC/indiv/s], size(n_ppfd)
     real(r8),            intent(in)    :: total_resp(:)  ! whole-plant total respiration at each swept PPFD [kgC/indiv/s], size(n_ppfd)
 
     this%gross_assim(:, iyear, ilight) = gross_assim(:)
+    this%leaf_resp(:, iyear, ilight) = leaf_resp(:)
     this%total_resp(:, iyear, ilight) = total_resp(:)
 
   end subroutine RecordLightResponse
@@ -402,11 +411,12 @@ contains
     integer              :: dbhID, treelaiID, crownareaID
     integer              :: leafcID, fnrtcID, sapwcID, structcID, storagecID
     integer              :: nID, lightintercepteffID, dailyabsorbedparindivID
+    integer              :: dailyincidentparID
     integer              :: meancisolveiterID, nbisectionfallbacksID
     integer              :: dailytempID, dailyvegesatID, dailycanvpressID
     integer              :: middaytempID, middayvegesatID, middaycanvpressID
     integer              :: tgrowthID, thomeID, nvpressconstrainedID
-    integer              :: grossassimID, totalrespID, leafanetID
+    integer              :: grossassimID, totalrespID, leafrespID, leafanetID
     integer              :: heightID, treesaiID, nvID, reprocID
     integer              :: dailynetcID, dailygppID, nppaccID, fracstoreID
     integer              :: dailyrdarkID, dailylivestemmrID, dailylivecrootmrID
@@ -493,6 +503,11 @@ contains
       type_double, '-',                                                                 &
       'light interception efficiency: whole-plant absorbed PAR / absorbed PAR of an equal-leaf-area, zero-self-shading reference surface, energy-weighted over the day (Sterck et al. 2013)', &
       lightintercepteffID, coordinates='time light_level')
+      
+    call RegisterVarAtts(ncid, 'daily_incident_par', (/dimIDs(1), dimIDs(3)/),    &
+      type_double, 'J m-2 crown footprint day-1',                                 &
+      'incident PAR at the top of the crown, integrated over the day', &
+      dailyincidentparID, coordinates='time light_level')
 
     call RegisterVarAtts(ncid, 'daily_absorbed_par_indiv', (/dimIDs(1), dimIDs(3)/),    &
       type_double, 'J indiv-1 day-1',                                                   &
@@ -547,6 +562,11 @@ contains
       type_double, 'kgC indiv-1 s-1',                                                   &
       'whole-plant gross assimilation at each swept PPFD (first day of year, pure diffuse illumination, coszen=1)', &
       grossassimID, coordinates='ppfd year light_level')
+      
+    call RegisterVarAtts(ncid, 'leaf_resp', (/dimIDs(5), dimIDs(4), dimIDs(3)/),       &
+      type_double, 'kgC indiv-1 s-1',                                                   &
+      'whole-plant leaf dark respiration at each swept PPFD (first day of year)', &
+      leafrespID, coordinates='ppfd year light_level')
 
     call RegisterVarAtts(ncid, 'total_resp', (/dimIDs(5), dimIDs(4), dimIDs(3)/),       &
       type_double, 'kgC indiv-1 s-1',                                                   &
@@ -557,6 +577,14 @@ contains
       type_double, 'umol m-2 s-1',                                                      &
       'leaf-level net photosynthesis (Aarea) at each swept PPFD, applied directly to a single canopy layer with no canopy attenuation or self-shading (first day of year) (Sterck et al. 2013)', &
       leafanetID, coordinates='ppfd year light_level')
+      
+    call RegisterVarAtts(ncid, 'frac_store', (/dimIDs(1), dimIDs(3)/), type_double,   &
+        '-', 'storage carbon as a fraction of target leaf carbon', fracstoreID,         &
+        coordinates='time light_level')
+
+    call RegisterVarAtts(ncid, 'cmort', (/dimIDs(1), dimIDs(3)/), type_double,        &
+        'indiv yr-1', 'carbon starvation mortality rate', cmortID,                      &
+        coordinates='time light_level')
 
     if (.not. this%reduced_output) then
 
@@ -623,14 +651,6 @@ contains
         'carbon balance handed to PARTEH (net of growth respiration)', nppaccID,        &
         coordinates='time light_level')
 
-      call RegisterVarAtts(ncid, 'frac_store', (/dimIDs(1), dimIDs(3)/), type_double,   &
-        '-', 'storage carbon as a fraction of target leaf carbon', fracstoreID,         &
-        coordinates='time light_level')
-
-      call RegisterVarAtts(ncid, 'cmort', (/dimIDs(1), dimIDs(3)/), type_double,        &
-        'indiv yr-1', 'carbon starvation mortality rate', cmortID,                      &
-        coordinates='time light_level')
-
       call RegisterVarAtts(ncid, 'maintresp_reduction_factor',                          &
         (/dimIDs(1), dimIDs(3)/), type_double, '-',                                     &
         'storage-based maintenance-respiration throttle', maintrespreductionfactorID,   &
@@ -677,6 +697,7 @@ contains
     call WriteVar(ncid, storagecID, this%storage_c(:,:))
     call WriteVar(ncid, nID, this%n(:,:))
     call WriteVar(ncid, lightintercepteffID, this%light_intercept_eff(:,:))
+    call WriteVar(ncid, dailyincidentparID, this%daily_incident_par(:,:))
     call WriteVar(ncid, dailyabsorbedparindivID, this%daily_absorbed_par_indiv(:,:))
     call WriteVar(ncid, dailytempID, this%daily_temp(:))
     call WriteVar(ncid, dailyvegesatID, this%daily_veg_esat(:))
@@ -691,8 +712,11 @@ contains
     call WriteVar(ncid, nbisectionfallbacksID, this%n_bisection_fallbacks(:))
     call WriteVar(ncid, ppfdID, ppfd_values(:))
     call WriteVar(ncid, grossassimID, this%gross_assim(:,:,:))
+    call WriteVar(ncid, leafrespID, this%leaf_resp(:,:,:))
     call WriteVar(ncid, totalrespID, this%total_resp(:,:,:))
     call WriteVar(ncid, leafanetID, this%leaf_anet(:,:,:))
+    call WriteVar(ncid, fracstoreID, this%frac_store(:,:))
+    call WriteVar(ncid, cmortID, this%cmort(:,:))
 
     if (.not. this%reduced_output) then
       call WriteVar(ncid, heightID, this%height(:,:))
@@ -711,8 +735,6 @@ contains
       call WriteVar(ncid, sapwturnoverID, this%sapw_turnover(:,:))
       call WriteVar(ncid, structturnoverID, this%struct_turnover(:,:))
       call WriteVar(ncid, nppaccID, this%npp_acc(:,:))
-      call WriteVar(ncid, fracstoreID, this%frac_store(:,:))
-      call WriteVar(ncid, cmortID, this%cmort(:,:))
       call WriteVar(ncid, maintrespreductionfactorID, this%maintresp_reduction_factor(:,:))
       call WriteVar(ncid, parsunID, this%parsun_z(:,:,:))
       call WriteVar(ncid, parshaID, this%parsha_z(:,:,:))
