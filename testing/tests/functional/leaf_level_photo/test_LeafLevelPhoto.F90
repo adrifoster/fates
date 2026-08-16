@@ -89,9 +89,10 @@ program FatesTestLeafLevelPhoto
   integer :: n_par, n_co2, n_vpd, n_temp, n_soilfrac ! sweep array sizes
   integer :: i ! looping index
   
+  character(len=:), allocatable :: out_file ! output file name
+  
   ! CONSTANTS:
-  integer,          parameter :: target_pft = 6 ! PFT index to evaluate (1-based)
-  character(len=*), parameter :: out_file = 'leaf_level_photo_out.nc' ! output file
+  integer, parameter :: target_pft = 1 ! PFT index to evaluate (1-based)
 
   ! sweep ranges
   real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
@@ -100,14 +101,21 @@ program FatesTestLeafLevelPhoto
   real(r8), parameter :: min_co2  = 250.0_r8,  max_co2  = 1000.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
   real(r8), parameter :: soilfrac_inc = 0.02_r8 ! [0-1]
 
+  ! read in parameter file name from command line
   param_file = command_line_arg(1)
+  
+  ! output file name, depends on either arg2 or is just default
+  if (command_argument_count() >= 2) then
+    out_file = trim(command_line_arg(2))
+  else
+    out_file = 'leaf_level_photo_out.nc'
+  end if
+  
   call ReadParameters(param_file)
 
   smpsc = EDPftvarcon_inst%smpsc(target_pft)
   smpso = EDPftvarcon_inst%smpso(target_pft)
 
-  ! step_size is unused by anything this test exercises (no time-stepping occurs),
-  ! but InitializeGlobals requires a value
   call InitializeGlobals(86400.0_r8)
   numpft = size(prt_params%wood_density, dim=1)
   call FatesGlobalsInit(6, .false.)
@@ -123,8 +131,7 @@ program FatesTestLeafLevelPhoto
   ! leaf N content for target_pft - constant for the whole run
   lnc_top = LeafNitrogenContent(target_pft)
 
-  ! reference (25C, canopy-top) photosynthetic capacity for target_pft - the
-  ! constant for the whole run
+  ! photosynthetic capacity parameters for target_pft
   vcmax25top = EDPftvarcon_inst%vcmax25top(target_pft,1)
   jmax25top = param_derived%jmax25top(target_pft,1)
   kp25top = param_derived%kp25top(target_pft,1)
