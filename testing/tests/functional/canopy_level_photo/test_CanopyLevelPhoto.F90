@@ -117,7 +117,6 @@ program FatesCanopyLevelPhoto
   real(r8), allocatable :: anet_z_out(:,:)    ! per-layer area-weighted net photosynthesis [umolC/m2 leaf/s]
   integer,  allocatable :: nv_out(:)          ! number of occupied leaf layers at each prescribed LAI
   integer,  allocatable :: layer_index(:)     ! leaf-layer index coordinate [1..nlevleaf]
-
   ! per-layer working arrays, sized to the current LAI's nv
   real(r8), allocatable :: nscaler_z(:) ! per-leaf-layer nitrogen-scaling factor [0-1]
 
@@ -126,9 +125,10 @@ program FatesCanopyLevelPhoto
   integer :: ilai ! prescribed-LAI looping index
   integer :: iv   ! leaf-layer looping index
   
+  character(len=:), allocatable :: out_file ! output file name
+  
   ! CONSTANTS:
-  integer,          parameter :: target_pft = 6 ! PFT index to evaluate (1-based)
-  character(len=*), parameter :: out_file = 'canopy_level_photo_out.nc' ! output file
+  integer, parameter :: target_pft = 1 ! PFT index to evaluate (1-based)
   
   ! sweep ranges
   real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
@@ -146,7 +146,16 @@ program FatesCanopyLevelPhoto
   ! illumination geometry
   real(r8), parameter :: diagnostic_coszen = 1.0_r8 ! cosine of solar zenith angle (sun directly overhead)
 
+    ! read in parameter file name from command line
   param_file = command_line_arg(1)
+  
+  ! output file name, depends on either arg2 or is just default
+  if (command_argument_count() >= 2) then
+    out_file = trim(command_line_arg(2))
+  else
+    out_file = 'canopy_level_photo_out.nc'
+  end if
+  
   call ReadParameters(param_file)
   
   smpsc = EDPftvarcon_inst%smpsc(target_pft)
@@ -352,14 +361,7 @@ contains
     canopy_anet_out, canopy_agross_out, store_profile, ilai_store)
     !
     ! DESCRIPTION:
-    ! Integrates leaf photosynthesis down a canopy
-    ! (light_env, holding this LAI's structure) to a canopy net assimilation
-    ! per unit crown footprint area - which is per unit ground area here only
-    ! because this canopy fully covers its footprint (see the program header)
-    !
-    ! Writes nothing except canopy_anet_out unless store_profile is set, in
-    ! which case the per-layer diagnostics for column ilai_store of the
-    ! output arrays are filled as well.
+    ! Integrate leaf photosynthesis through a canopy
 
     ! ARGUMENTS:
     integer,  intent(in)           :: nv                ! number of occupied leaf layers

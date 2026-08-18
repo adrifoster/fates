@@ -20,6 +20,7 @@ program FatesSingleCohort
   use FatesConstantsMod,           only : wm2_to_umolm2s
   use FatesConstantsMod,           only : leaves_on, leaves_off
   use FatesConstantsMod,           only : ihard_season_decid
+  use EDTypesMod,                  only : min_n_safemath
   use EDParamsMod,                 only : nclmax
   use EDParamsMod,                 only : nlevleaf
   use EDParamsMod,                 only : GetNVegLayers
@@ -108,6 +109,14 @@ program FatesSingleCohort
   real(r8), parameter :: hrs_per_substep = 24.0_r8/n_substeps_per_day ! sub-daily step length [h]
   integer,  parameter :: n_days_total = nyears * days_per_year     ! total days per light level's trajectory
   integer,  parameter :: noon_substep = n_substeps_per_day/2 + 1   ! sub-daily index nearest solar noon (first sample after noon)
+  
+  ! cohort termination
+  ! this driver does not kill the cohorts but we will just stop running them
+  integer, parameter :: term_none        = 0  ! still alive
+  integer, parameter :: term_storage     = 1  ! storage carbon terminally depleted
+  integer, parameter :: term_live_pools  = 2  ! sapwood+leaf+fineroot terminally depleted
+  integer, parameter :: term_neg_biomass = 3  ! total cohort biomass negative
+  integer, parameter :: term_num_dens    = 4  ! number density below numerical safety
 
   ! read in parameter file name from command line
   param_file = command_line_arg(1)
@@ -257,6 +266,9 @@ contains
     integer                          :: n_bisection_calls                         ! Ci solver diagnostic
     integer                          :: max_solve_iter                            ! Ci solver diagnostic 
     integer                          :: sum_solve_iter                            ! Ci solver diagnostic
+    integer                          :: term_reason                               ! reason a cohort was terminated
+    integer                          :: term_year                                 ! year a cohort was terminated
+    
     
     n_photo_calls = 0
     n_bisection_calls = 0
@@ -281,9 +293,11 @@ contains
         reduced_output)
     end if
 
+    term_year = 0
+    
     ! loop on years and days
-    do iyear = 1, nyears
-      do iday = 1, days_per_year
+    year_loop: do iyear = 1, nyears
+      day_loop: do iday = 1, days_per_year
 
         iday_all = (iyear - 1)*days_per_year + iday
 
@@ -400,12 +414,19 @@ contains
           struct_turnover, npp_acc_to_prt, frac_store, cmort,                      &
           light_intercept_eff, maintresp_reduction_factor, daily_incident_par,     &
           daily_absorbed_par_indiv, env)
+          
+        ! stop running this cohort if it meets criteria for being terminated
+        term_reason = Terminate(cohort)
+        if (term_reason /= term_none) then 
+          term_year = iyear 
+          exit year_loop
+        end if 
 
-      end do
+      end do day_loop
 
       storage_c = cohort%prt%GetState(store_organ, carbon12_element)
 
-    end do
+    end do year_loop
 
     n_photo_calls_total = n_photo_calls_total + n_photo_calls
     n_bisection_calls_total = n_bisection_calls_total + n_bisection_calls
@@ -416,6 +437,8 @@ contains
     ! call across all n_days_total days
     mean_solve_iter = real(sum_solve_iter, r8) / real(n_photo_calls, r8)
     call hist%RecordLightLevelSummary(ilight, mean_solve_iter, n_bisection_calls)
+    
+    call hist%RecordTermination(ilight, term_year, term_reason)
 
     ! tear down the cohort and its light environment before moving to the next
     ! light level so each level starts over independently from recruitment size
@@ -750,5 +773,48 @@ contains
     cohort%n = max(0.0_r8, cohort%n * (1.0_r8 - cmort/real(days_per_year, r8)))
 
   end subroutine DailyGrowthAndMortality
+  
+  ! ==========================================================================
+
+  integer function Terminate(cohort) result(reason)
+    !
+    ! DESCRIPTION:
+    ! 
+    ! Check whether this cohort should be terminated for some reason
+
+    ! ARGUMENTS:
+    type(fates_cohort_type), intent(in) :: cohort ! cohort
+
+    ! LOCALS:
+    real(r8) :: leaf_c   ! leaf carbon [kgC/indiv]
+    real(r8) :: store_c  ! storage carbon [kgC/indiv]
+    real(r8) :: sapw_c   ! sapwood carbon [kgC/indiv]
+    real(r8) :: fnrt_c   ! fine root carbon [kgC/indiv]
+    real(r8) :: struct_c ! structural carbon [kgC/indiv]
+
+    ! CONSTANTS:
+    real(r8), parameter :: pool_min = 1.0e-10_r8  ! depletion threshold [kgC/indiv]
+
+    reason = term_none
+
+    leaf_c = cohort%prt%GetState(leaf_organ, carbon12_element)
+    store_c = cohort%prt%GetState(store_organ, carbon12_element)
+    sapw_c = cohort%prt%GetState(sapw_organ, carbon12_element)
+    fnrt_c = cohort%prt%GetState(fnrt_organ, carbon12_element)
+    struct_c = cohort%prt%GetState(struct_organ, carbon12_element)
+
+    ! ordered so the earliest-firing criterion is reported: in a carbon-starved
+    ! cohort storage crosses zero years before the live pools run out
+    if (store_c < pool_min) then
+      reason = term_storage
+    else if ((sapw_c + leaf_c + fnrt_c) < pool_min) then
+      reason = term_live_pools
+    else if ((struct_c + sapw_c + leaf_c + fnrt_c + store_c) < 0.0_r8) then
+      reason = term_neg_biomass
+    else if (cohort%n < min_n_safemath) then
+      reason = term_num_dens
+    end if
+
+  end function Terminate
 
 end program FatesSingleCohort

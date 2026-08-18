@@ -35,7 +35,7 @@ program FatesTestLeafLevelPhoto
   use FatesConstantsMod,           only : lmrmodel_atkin_etal_2017
   use LeafBiophysicsMod,           only : lb_params
   use LeafBiophysicsMod,           only : FvCB1980, medlyn_model, net_assim_model
-  use LeafBiophysicsMod,           only : photosynth_acclim_model_kumarathunge_etal_2019
+  use LeafBiophysicsMod,           only : photosynth_acclim_model_kumarathunge_etal_2019, photosynth_acclim_model_none
   use LeafBiophysicsMod,           only : QSat
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestEnvironmentMod,     only : default_vpd, default_nscaler, default_par

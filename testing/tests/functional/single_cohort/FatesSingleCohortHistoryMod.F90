@@ -84,6 +84,10 @@ module FatesSingleCohortHistoryMod
   ! whole-trajectory Ci-solver summary, dimensioned (light_level)
   real(r8), allocatable :: mean_ci_solve_iter(:)    ! mean Ci-solver iteration count over every LeafLayerPhotosynthesis call in this trajectory [-]
   integer,  allocatable :: n_bisection_fallbacks(:) ! count of those calls that fell back to CiBisection [-]
+  
+  ! termination year and reason
+  integer,  allocatable :: term_year(:)   ! year the cohort met a termination reason, 0 = never [-]
+  integer,  allocatable :: term_reason(:) ! which reason: 0 none, 1 storage, 2 live pools, 3 negative biomass, 4 number density [-]
 
   ! per-leaf-layer light profile, dimensioned (nlevleaf, year, light_level)
   real(r8), allocatable :: parsun_z(:,:,:) ! absorbed PAR, sunlit leaves [W/m2 crown footprint]
@@ -113,6 +117,7 @@ module FatesSingleCohortHistoryMod
     procedure, public :: RecordLightResponse
     procedure, public :: RecordLeafNetAssim
     procedure, public :: RecordLightLevelSummary
+    procedure, public :: RecordTermination
     procedure, public :: WriteVals
 
   end type history_type
@@ -159,6 +164,8 @@ contains
     allocate(this%light_intercept_eff(n_time, n_light))
     allocate(this%daily_absorbed_par_indiv(n_time, n_light))
     allocate(this%daily_incident_par(n_time, n_light))
+    allocate(this%frac_store(n_time, n_light))
+    allocate(this%cmort(n_time, n_light))
     allocate(this%gross_assim(n_ppfd, n_year, n_light))
     allocate(this%leaf_resp(n_ppfd, n_year, n_light))
     allocate(this%total_resp(n_ppfd, n_year, n_light))
@@ -167,6 +174,11 @@ contains
     ! cheap (light_level only) numerical-health check
     allocate(this%mean_ci_solve_iter(n_light))
     allocate(this%n_bisection_fallbacks(n_light))
+    
+    allocate(this%term_year(n_light))
+    allocate(this%term_reason(n_light))
+    this%term_year(:) = 0
+    this%term_reason(:) = 0
 
     ! daily environmental forcing (time only)
     allocate(this%daily_temp(n_time))
@@ -179,8 +191,38 @@ contains
     allocate(this%t_home(n_time))
     allocate(this%n_vpress_constrained(n_time))
     
-    allocate(this%frac_store(n_time, n_light))
-    allocate(this%cmort(n_time, n_light))
+    ! fill with unset
+    this%dbh(:,:) = fates_unset_r8
+    this%treelai(:,:) = fates_unset_r8
+    this%crown_area(:,:) = fates_unset_r8
+    this%leaf_c(:,:) = fates_unset_r8
+    this%fnrt_c(:,:) = fates_unset_r8
+    this%sapw_c(:,:) = fates_unset_r8
+    this%struct_c(:,:) = fates_unset_r8
+    this%storage_c(:,:) = fates_unset_r8
+    this%n(:,:) = fates_unset_r8
+    this%light_intercept_eff(:,:) = fates_unset_r8
+    this%daily_absorbed_par_indiv(:,:) = fates_unset_r8
+    this%daily_incident_par(:,:) = fates_unset_r8
+    this%frac_store(:,:) = fates_unset_r8
+    this%cmort(:,:) = fates_unset_r8
+    this%gross_assim(:,:,:) = fates_unset_r8
+    this%leaf_resp(:,:,:) = fates_unset_r8
+    this%total_resp(:,:,:) = fates_unset_r8
+    this%leaf_anet(:,:,:) = fates_unset_r8
+    this%mean_ci_solve_iter(:) = fates_unset_r8
+    this%n_bisection_fallbacks(:) = 0
+    
+    this%daily_temp(:) = fates_unset_r8
+    this%daily_veg_esat(:) = fates_unset_r8
+    this%daily_can_vpress(:) = fates_unset_r8
+    this%midday_temp(:) = fates_unset_r8
+    this%midday_veg_esat(:) = fates_unset_r8
+    this%midday_can_vpress(:) = fates_unset_r8
+    this%t_growth(:) = fates_unset_r8
+    this%t_home(:) = fates_unset_r8
+    this%n_vpress_constrained(:) = 0
+    
 
     ! only allocate in reduced_output mode
     if (.not. this%reduced_output) then
@@ -205,6 +247,24 @@ contains
       allocate(this%parsha_z(n_leaf, n_year, n_light))
       allocate(this%laisun_z(n_leaf, n_year, n_light))
       allocate(this%laisha_z(n_leaf, n_year, n_light))
+           
+      this%height(:, :) = fates_unset_r8
+      this%treesai(:, :) = fates_unset_r8
+      this%nv(:, :) = 0
+      this%repro_c(:, :) = fates_unset_r8
+      this%daily_net_c(:, :) = fates_unset_r8
+      this%daily_gpp(:, :) = fates_unset_r8
+      this%daily_rdark(:, :) = fates_unset_r8
+      this%daily_livestem_mr(:, :) = fates_unset_r8
+      this%daily_livecroot_mr(:, :) = fates_unset_r8
+      this%daily_froot_mr(:, :) = fates_unset_r8
+      this%daily_growth_resp(:, :) = fates_unset_r8
+      this%leaf_turnover(:, :) = fates_unset_r8
+      this%fnrt_turnover(:, :) = fates_unset_r8
+      this%sapw_turnover(:, :) = fates_unset_r8
+      this%struct_turnover(:, :) = fates_unset_r8
+      this%npp_acc(:, :) = fates_unset_r8
+      this%maintresp_reduction_factor(:, :) = fates_unset_r8
       this%parsun_z(:,:,:) = fates_unset_r8
       this%parsha_z(:,:,:) = fates_unset_r8
       this%laisun_z(:,:,:) = fates_unset_r8
@@ -383,6 +443,25 @@ contains
     this%n_bisection_fallbacks(ilight) = n_bisection_calls
 
   end subroutine RecordLightLevelSummary
+  
+  ! ==========================================================================
+  
+  subroutine RecordTermination(this, ilight, term_year, term_reason)
+    !
+    ! DESCRIPTION:
+    ! Record whether and why this light level's cohort was terminated
+    !
+
+    ! ARGUMENTS:
+    class(history_type), intent(inout) :: this        ! history object
+    integer,             intent(in)    :: ilight      ! light-level index
+    integer,             intent(in)    :: term_year   ! year the cohort terminated, 0 = never [-]
+    integer,             intent(in)    :: term_reason ! termination criterion met, 0 = none [-]
+
+    this%term_year(ilight) = term_year
+    this%term_reason(ilight) = term_reason
+
+  end subroutine RecordTermination
 
   ! ==========================================================================
 
@@ -424,6 +503,7 @@ contains
     integer              :: leafturnoverID, fnrtturnoverID, sapwturnoverID, structturnoverID
     integer              :: cmortID, maintrespreductionfactorID
     integer              :: parsunID, parshaID, laisunID, laishaID
+    integer              :: termyearID, termreasonID
 
     ! create day, leaf layer, and year indices
     allocate(time_idx(this%n_time))
@@ -557,6 +637,15 @@ contains
     call RegisterVarAtts(ncid, 'n_bisection_fallbacks', dimIDs(3:3), type_int, '-',     &
       'count of LeafLayerPhotosynthesis calls that fell back to CiBisection in this trajectory', &
       nbisectionfallbacksID, coordinates='light_level')
+      
+    call RegisterVarAtts(ncid, 'term_year', dimIDs(3:3), type_int, '-',                &
+      'year the cohort met a termination criterion, 0 = ran the full trajectory',      &
+      termyearID, coordinates='light_level')
+
+    call RegisterVarAtts(ncid, 'term_reason', dimIDs(3:3), type_int, '-',              &
+      'termination criterion met: 0 none, 1 storage depleted, 2 live pools depleted, ' // &
+      '3 negative total biomass, 4 number density below numerical safety',             &
+      termreasonID, coordinates='light_level')
 
     call RegisterVarAtts(ncid, 'gross_assim', (/dimIDs(5), dimIDs(4), dimIDs(3)/),      &
       type_double, 'kgC indiv-1 s-1',                                                   &
@@ -710,6 +799,8 @@ contains
     call WriteVar(ncid, nvpressconstrainedID, this%n_vpress_constrained(:))
     call WriteVar(ncid, meancisolveiterID, this%mean_ci_solve_iter(:))
     call WriteVar(ncid, nbisectionfallbacksID, this%n_bisection_fallbacks(:))
+    call WriteVar(ncid, termyearID, this%term_year(:))
+    call WriteVar(ncid, termreasonID, this%term_reason(:))
     call WriteVar(ncid, ppfdID, ppfd_values(:))
     call WriteVar(ncid, grossassimID, this%gross_assim(:,:,:))
     call WriteVar(ncid, leafrespID, this%leaf_resp(:,:,:))
