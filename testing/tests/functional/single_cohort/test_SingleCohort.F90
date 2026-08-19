@@ -72,6 +72,7 @@ program FatesSingleCohort
   real(r8), allocatable         :: light_frac(:)           ! swept incident light fractions [0-1]
   real(r8), allocatable         :: diagnostic_ppfd(:)      ! swept PPFD values for LightResponseSweep [umol/m2/s]
   real(r8)                      :: dbh_recruit             ! recruitment-size dbh [cm]
+  real(r8)                      :: cohort_n                ! cohort density [stems/m2]
   real(r8)                      :: lnc_top                 ! leaf N content at the canopy top [gN/m2 leaf]
   real(r8)                      :: par_absorptance         ! PFT fractional PAR absorptance, 1 - rhol(ipar) - taul(ipar) [-]
   integer                       :: ilight                  ! fractional light level looping index
@@ -87,7 +88,6 @@ program FatesSingleCohort
   ! CONSTANTS:
   integer,                     parameter :: pft = 1                         ! plant functional type to simulate
   real(r8),                    parameter :: patch_area = 1.0e4_r8           ! reference ground area the cohort occupies [m2]
-  real(r8),                    parameter :: n_indiv = 1.0_r8                ! number of individuals in the cohort
   real(r8),                    parameter :: coh_age = 0.0_r8                ! cohort age
   real(r8),                    parameter :: site_spread = 1.0_r8            ! site spread index
   integer,                     parameter :: leaf_on_doy = 60                ! prescribed leaf on day of year (for cold deciduous PFTs)
@@ -176,6 +176,7 @@ program FatesSingleCohort
 
   ! recruitment-size initialization
   call h2d_allom(EDPftvarcon_inst%hgt_min(pft), pft, dbh_recruit)
+  cohort_n = EDPftvarcon_inst%initd(pft)*patch_area
 
   ! build the log-spaced incident light fractions to sweep
   allocate(light_frac(n_light_levels))
@@ -298,7 +299,7 @@ contains
 
     ! create a new cohort at recruitment size
     allocate(cohort)
-    call CohortFactory(cohort, pft, can_tlai, dbh=dbh_recruit, number=n_indiv,      &
+    call CohortFactory(cohort, pft, can_tlai, dbh=dbh_recruit, number=cohort_n,     &
       patch_area=patch_area, age=coh_age, site_spread=site_spread,                  &
       canopy_layer=cohort_can_layer)
     cohort%nv = GetNVegLayers(cohort%treelai + cohort%treesai)
