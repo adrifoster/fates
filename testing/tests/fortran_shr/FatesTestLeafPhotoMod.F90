@@ -175,7 +175,7 @@ contains
   ! ==========================================================================
   
   subroutine LeafLayerNitrogenScaling(treelai, treesai, height, nv, pft,        &
-    vcmax25top, nscaler_z)
+    vcmax25top, lai_above_in, nscaler_z)
     !
     ! DESCRIPTION:
     ! Per-leaf-layer nitrogen-scaling factor (nscaler), the vertical decay of
@@ -191,6 +191,7 @@ contains
     real(r8), intent(in)  :: treelai      ! in-crown leaf area index [m2 leaf/m2 crown footprint]
     real(r8), intent(in)  :: treesai      ! in-crown stem area index [m2 stem/m2 crown footprint]
     real(r8), intent(in)  :: height       ! plant/canopy height [m]
+    real(r8), intent(in)  :: lai_above_in ! lai above the cohort
     integer,  intent(in)  :: nv           ! number of occupied leaf layers
     integer,  intent(in)  :: pft          ! plant functional type index
     real(r8), intent(in)  :: vcmax25top   ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
@@ -210,8 +211,8 @@ contains
     ! capacity, neither of which varies by layer
     kn = DecayCoeffVcmax(vcmax25top, prt_params%leafn_vert_scaler_coeff1(pft), &
       prt_params%leafn_vert_scaler_coeff2(pft))
-
-    lai_above = 0.0_r8
+    
+    lai_above = lai_above_in
     do iv = 1, nv
       call VegAreaLayer(treelai, treesai, height, iv, nv, pft, snow_depth,     &
         vai_top, vai_bot, elai_layer, esai_layer)

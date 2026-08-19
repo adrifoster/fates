@@ -66,6 +66,7 @@ module FatesSingleCohortHistoryMod
   real(r8), allocatable :: n(:,:)                          ! cohort number density, surviving fraction of the original recruitment cohort [0-1]
   real(r8), allocatable :: light_intercept_eff(:,:)        ! light interception efficiency [-]
   real(r8), allocatable :: maintresp_reduction_factor(:,:) ! storage-based maintenance-respiration throttle [0-1]
+  real(r8), allocatable :: daily_absorbed_par_area(:,:)    ! whole-plant absorbed PAR per unit crown footprint, integrated over the day [J m-2 crown footprint day-1]
   real(r8), allocatable :: daily_absorbed_par_indiv(:,:)   ! whole-plant absorbed PAR per individual, integrated over the day [J indiv-1 day-1]
   real(r8), allocatable :: daily_incident_par(:,:)         ! incident PAR at the top of the crown, integrated over the day [J m-2 crown footprint day-1]
   integer,  allocatable :: nv(:,:)                         ! number of occupied leaf+stem layers [-]
@@ -162,6 +163,7 @@ contains
     allocate(this%storage_c(n_time, n_light))
     allocate(this%n(n_time, n_light))
     allocate(this%light_intercept_eff(n_time, n_light))
+    allocate(this%daily_absorbed_par_area(n_time, n_light))
     allocate(this%daily_absorbed_par_indiv(n_time, n_light))
     allocate(this%daily_incident_par(n_time, n_light))
     allocate(this%frac_store(n_time, n_light))
@@ -202,6 +204,7 @@ contains
     this%storage_c(:,:) = fates_unset_r8
     this%n(:,:) = fates_unset_r8
     this%light_intercept_eff(:,:) = fates_unset_r8
+    this%daily_absorbed_par_area(:,:) = fates_unset_r8
     this%daily_absorbed_par_indiv(:,:) = fates_unset_r8
     this%daily_incident_par(:,:) = fates_unset_r8
     this%frac_store(:,:) = fates_unset_r8
@@ -279,7 +282,8 @@ contains
     daily_rdark, daily_livestem_mr, daily_livecroot_mr, daily_froot_mr,        &
     daily_growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,            &
     struct_turnover, npp_acc, frac_store, cmort, light_intercept_eff,          &
-    maintresp_reduction_factor, daily_incident_par, daily_absorbed_par_indiv, env)
+    maintresp_reduction_factor, daily_incident_par, daily_absorbed_par_area,   &
+    daily_absorbed_par_indiv, env)
     !
     ! DESCRIPTION:
     ! Capture one day's daily time series, optionally skip some if we are doing
@@ -308,6 +312,7 @@ contains
     real(r8),                intent(in)    :: light_intercept_eff        ! light interception efficiency [-]
     real(r8),                intent(in)    :: maintresp_reduction_factor ! storage-based maintenance-respiration throttle [0-1]
     real(r8),                intent(in)    :: daily_incident_par         ! incident PAR [J m-2 crown footprint day-1] 
+    real(r8),                intent(in)    :: daily_absorbed_par_area    ! whole-plant absorbed PAR per unit crown footprint [J m-2 crown footprint day-1]
     real(r8),                intent(in)    :: daily_absorbed_par_indiv   ! whole-plant absorbed PAR per individual [J indiv-1 day-1]
 
     ! daily environmental forcing
@@ -333,6 +338,7 @@ contains
     this%n(iday_all, ilight) = cohort%n
     this%light_intercept_eff(iday_all, ilight) = light_intercept_eff
     this%daily_incident_par(iday_all, ilight) = daily_incident_par
+    this%daily_absorbed_par_area(iday_all, ilight) = daily_absorbed_par_area
     this%daily_absorbed_par_indiv(iday_all, ilight) = daily_absorbed_par_indiv
     this%frac_store(iday_all, ilight) = frac_store
     this%cmort(iday_all, ilight) = cmort
@@ -490,7 +496,7 @@ contains
     integer              :: dbhID, treelaiID, crownareaID
     integer              :: leafcID, fnrtcID, sapwcID, structcID, storagecID
     integer              :: nID, lightintercepteffID, dailyabsorbedparindivID
-    integer              :: dailyincidentparID
+    integer              :: dailyincidentparID, dailyabsorbedparareaID
     integer              :: meancisolveiterID, nbisectionfallbacksID
     integer              :: dailytempID, dailyvegesatID, dailycanvpressID
     integer              :: middaytempID, middayvegesatID, middaycanvpressID
@@ -588,6 +594,11 @@ contains
       type_double, 'J m-2 crown footprint day-1',                                 &
       'incident PAR at the top of the crown, integrated over the day', &
       dailyincidentparID, coordinates='time light_level')
+
+    call RegisterVarAtts(ncid, 'daily_absorbed_par_area', (/dimIDs(1), dimIDs(3)/),     &
+      type_double, 'J m-2 crown footprint day-1',                                       &
+      'absorbed PAR per unit crown footprint, integrated over the day - same basis as daily_incident_par, so their ratio is the absorbed fraction', &
+      dailyabsorbedparareaID, coordinates='time light_level')
 
     call RegisterVarAtts(ncid, 'daily_absorbed_par_indiv', (/dimIDs(1), dimIDs(3)/),    &
       type_double, 'J indiv-1 day-1',                                                   &
@@ -787,6 +798,7 @@ contains
     call WriteVar(ncid, nID, this%n(:,:))
     call WriteVar(ncid, lightintercepteffID, this%light_intercept_eff(:,:))
     call WriteVar(ncid, dailyincidentparID, this%daily_incident_par(:,:))
+    call WriteVar(ncid, dailyabsorbedparareaID, this%daily_absorbed_par_area(:,:))
     call WriteVar(ncid, dailyabsorbedparindivID, this%daily_absorbed_par_indiv(:,:))
     call WriteVar(ncid, dailytempID, this%daily_temp(:))
     call WriteVar(ncid, dailyvegesatID, this%daily_veg_esat(:))

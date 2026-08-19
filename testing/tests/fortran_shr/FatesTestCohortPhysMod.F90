@@ -77,7 +77,7 @@ contains
 
   ! ==========================================================================
 
-  subroutine DailySetup(this, cohort, pft, frac_store)
+  subroutine DailySetup(this, cohort, pft, lai_above, frac_store)
     !
     ! DESCRIPTION:
     ! Calculate a daily setup: storage-based maintenance-respiration factor,
@@ -89,6 +89,7 @@ contains
     class(cohort_phys_type), intent(inout) :: this       ! cohort physiology object
     type(fates_cohort_type), intent(in)    :: cohort     ! cohort to set up for today
     integer,                 intent(in)    :: pft        ! plant functional type index
+    real(r8),                intent(in)    :: lai_above  ! lai above the cohort [m2/m2]
     real(r8),                intent(out)   :: frac_store ! ratio of storage carbon to target_leaf_c [-]
 
     ! LOCALS:
@@ -118,7 +119,7 @@ contains
     call EnsureAllocated(this, cohort%nv)
 
     call LeafLayerNitrogenScaling(cohort%treelai, cohort%treesai,              &
-      cohort%height, cohort%nv, pft, cohort%vcmax25top, this%nscaler_z)
+      cohort%height, cohort%nv, pft, cohort%vcmax25top, lai_above, this%nscaler_z)
 
   end subroutine DailySetup
 

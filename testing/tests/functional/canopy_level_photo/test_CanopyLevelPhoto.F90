@@ -273,7 +273,7 @@ program FatesCanopyLevelPhoto
     if (allocated(nscaler_z)) deallocate(nscaler_z)
     allocate(nscaler_z(nv_out(ilai)))
     call LeafLayerNitrogenScaling(lai_vals(ilai), canopy_sai, canopy_height,   &
-      nv_out(ilai), target_pft, vcmax25top, nscaler_z)
+      nv_out(ilai), target_pft, vcmax25top, 0.0_r8, nscaler_z)
 
     ! call for reference case: this driver's prescribed clear-sky beam fraction.
     ! This call stores the per-leaf-layer profile

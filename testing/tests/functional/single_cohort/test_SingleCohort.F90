@@ -86,11 +86,10 @@ program FatesSingleCohort
 
   ! CONSTANTS:
   integer,                     parameter :: pft = 1                         ! plant functional type to simulate
-  real(r8), dimension(nclmax), parameter :: can_tlai = 0.0_r8               ! canopy-layer LAI above the cohort
   real(r8),                    parameter :: patch_area = 1.0e4_r8           ! reference ground area the cohort occupies [m2]
   real(r8),                    parameter :: n_indiv = 1.0_r8                ! number of individuals in the cohort
   real(r8),                    parameter :: coh_age = 0.0_r8                ! cohort age
-  real(r8),                    parameter :: site_spread = 0.0_r8            ! site spread index
+  real(r8),                    parameter :: site_spread = 1.0_r8            ! site spread index
   integer,                     parameter :: leaf_on_doy = 60                ! prescribed leaf on day of year (for cold deciduous PFTs)
   integer,                     parameter :: leaf_off_doy = 305.             ! prescribed leaf off day of year (for cold deciduous PFTs)
   integer,                     parameter :: n_light_levels = 25             ! number of incident light levels to sweep
@@ -102,7 +101,7 @@ program FatesSingleCohort
   integer,                     parameter :: leaf_lcp_layer = 1              ! canopy layer swept for the leaf-level (LCPleaf) diagnostic
   integer,                     parameter :: days_per_year = 365             ! days per simulated year
   integer,                     parameter :: n_substeps_per_day = 48         ! sub-daily steps per day (half-hourly), must be even
-  integer,                     parameter :: nyears = 50                     ! number of years to simulate
+  integer,                     parameter :: nyears = 30                     ! number of years to simulate
   
   ! timing calculations
   real(r8), parameter :: step_size = 86400.0_r8/n_substeps_per_day ! model time step [s]
@@ -231,6 +230,7 @@ contains
     real(r8)                         :: diagnostic_leaf_resp(n_ppfd_diagnostic)   ! one year's leaf dark respiration output for the light response curve[kgC/indiv/s]
     real(r8)                         :: diagnostic_total_resp(n_ppfd_diagnostic)  ! one year's total-respiration output for the light response curve[kgC/indiv/s]
     real(r8)                         :: diagnostic_leaf_anet(n_ppfd_diagnostic)   ! one year's leaf-level net-photosynthesis output for the light response curve [umolC/m2 leaf/s]
+    real(r8)                         :: can_tlai(nclmax)                          ! canopy-layer LAI above the cohort
     real(r8)                         :: hour_of_day                               ! hour of day at the midpoint of the current substep [0-24]
     real(r8)                         :: frac_store                                ! ratio of storage carbon to target_leaf_c [-]
     real(r8)                         :: npp_acc_to_prt                            ! carbon_balance passed to PARTEH via cohort%npp_acc, net of growth respiration
@@ -253,12 +253,14 @@ contains
     real(r8)                         :: par_toc                                   ! current substep's incident PAR at the top of the crown [W/m2]
     real(r8)                         :: par_beam                                  ! current substep's direct PAR at the top of the crown [W/m2]
     real(r8)                         :: par_diff                                  ! current substep's diffuse PAR at the top of the crown [W/m2]
-    real(r8)                         :: daily_absorbed_par                        ! whole-plant absorbed PAR (parsun_z+parsha_z summed over layers), per unit leaf area, integrated over the day [J/m2 leaf]
-    real(r8)                         :: daily_incident_par                        ! incident PAR at the top of the crown, integrated over the day [J/m2 crown footprint] 
-    real(r8)                         :: daily_absorbed_par_indiv                  ! whole-plant absorbed PAR per individual, integrated over the day [J/indiv/day] 
+    real(r8)                         :: daily_absorbed_par_area                   ! whole-plant absorbed PAR (parsun_z+parsha_z summed over layers), per unit crown footprint, integrated over the day [J/m2 crown footprint/day]
+    real(r8)                         :: daily_absorbed_par                        ! the same, recast per unit leaf area [J/m2 leaf/day]
+    real(r8)                         :: daily_absorbed_par_indiv                  ! the same, recast per individual [J/indiv/day]
+    real(r8)                         :: daily_incident_par                        ! incident PAR at the top of the crown, integrated over the day [J/m2 crown footprint/day]
     real(r8)                         :: light_intercept_eff                       ! one day's light interception efficiency
     real(r8)                         :: maintresp_reduction_factor                ! one days's storage-based maintenance-respiration factor [0-1]
     real(r8)                         :: mean_solve_iter                           ! this light level's mean Ci-solver iteration count (sum_solve_iter/n_photo_calls), computed once at the end of this trajectory
+    real(r8)                         :: lai_above                                 ! lai above the cohort
     integer                          :: iyear, iday                               ! year/day looping indices
     integer                          :: iday_all                                  ! day index within this light level's trajectory (1..n_days_total)
     integer                          :: isubday                                   ! sub-daily looping index
@@ -268,17 +270,37 @@ contains
     integer                          :: sum_solve_iter                            ! Ci solver diagnostic
     integer                          :: term_reason                               ! reason a cohort was terminated
     integer                          :: term_year                                 ! year a cohort was terminated
+    integer                          :: cohort_can_layer                          ! cohort canopy layer (1=upperstory, 2+ - understory layers)
     
+    ! CONSTANTS:
+    real(r8) :: k = 0.5_r8 ! extinction coefficient for deriving canopy_layer_tlai
     
+    ! set counters
     n_photo_calls = 0
     n_bisection_calls = 0
     max_solve_iter = 0
     sum_solve_iter = 0
+    
+    ! determine and set can_tlai
+    can_tlai(:) = 0.0_r8 ! first set everything to 0.0
+    if (light_frac_val == 1.0_r8) then 
+      ! canopy tree
+      cohort_can_layer = 1
+      lai_above = 0.0_r8
+    else
+      cohort_can_layer = 2
+      lai_above = -1.0_r8 * log(light_frac_val)/k
+    end if 
+
+    can_tlai(1) = lai_above
+    can_tlai(2) = 0.0_r8
+    
 
     ! create a new cohort at recruitment size
     allocate(cohort)
     call CohortFactory(cohort, pft, can_tlai, dbh=dbh_recruit, number=n_indiv,      &
-      patch_area=patch_area, age=coh_age, site_spread=site_spread)
+      patch_area=patch_area, age=coh_age, site_spread=site_spread,                  &
+      canopy_layer=cohort_can_layer)
     cohort%nv = GetNVegLayers(cohort%treelai + cohort%treesai)
 
     ! initialize the light environment
@@ -307,13 +329,12 @@ contains
         daily_livestem_mr = 0.0_r8
         daily_livecroot_mr = 0.0_r8
         daily_froot_mr = 0.0_r8
-        daily_absorbed_par = 0.0_r8
+        daily_absorbed_par_area = 0.0_r8
         daily_incident_par = 0.0_r8
-        daily_absorbed_par_indiv = 0.0_r8
 
         ! once-per-day setup: maintenance respiration factor, sapwood/fine-root N, and the per-layer
         ! nitrogen-scaling factor 
-        call phys%DailySetup(cohort, pft, frac_store)
+        call phys%DailySetup(cohort, pft, lai_above, frac_store)
 
         ! today's storage-based maintenance-respiration factor
         ! recalculated for output
@@ -344,13 +365,11 @@ contains
             n_photo_calls, n_bisection_calls, max_solve_iter, sum_solve_iter,      &
             gpp_tstep, rdark_tstep, nonleaf_mr_tstep)
           
-          ! accumulate metrics for light interception efficiency
+          ! accumulate absorbed and incident PAR, both per unit crown footprint
           if (light_env%treelai > nearzero) then
-            daily_absorbed_par = daily_absorbed_par +                              &
-              sum(light_env%parsun_z(:) + light_env%parsha_z(:)) / light_env%treelai * step_size
+            daily_absorbed_par_area = daily_absorbed_par_area +                    &
+              sum(light_env%parsun_z(:) + light_env%parsha_z(:)) * step_size
             daily_incident_par = daily_incident_par + par_toc * step_size
-            daily_absorbed_par_indiv = daily_absorbed_par_indiv +                  &
-              sum(light_env%parsun_z(:) + light_env%parsha_z(:)) * cohort%c_area / cohort%n * step_size
           end if
 
           ! instantaneous whole-plant light-response
@@ -381,6 +400,12 @@ contains
           daily_froot_mr = daily_froot_mr + cohort%froot_mr * step_size
 
         end do
+
+        ! recast the day's absorbed PAR onto the per-leaf-area and per-individual
+        ! bases. treelai, c_area and n are all held fixed across the substep loop,
+        ! so scaling the daily total matches scaling each substep
+        daily_absorbed_par = daily_absorbed_par_area / max(light_env%treelai, nearzero)
+        daily_absorbed_par_indiv = daily_absorbed_par_area * cohort%c_area / cohort%n
 
         ! calculate light interception efficiency
         if (daily_incident_par > nearzero) then
@@ -413,7 +438,7 @@ contains
           growth_resp, leaf_turnover, fnrt_turnover, sapw_turnover,                &
           struct_turnover, npp_acc_to_prt, frac_store, cmort,                      &
           light_intercept_eff, maintresp_reduction_factor, daily_incident_par,     &
-          daily_absorbed_par_indiv, env)
+          daily_absorbed_par_area, daily_absorbed_par_indiv, env)
           
         ! stop running this cohort if it meets criteria for being terminated
         term_reason = Terminate(cohort)

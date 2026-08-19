@@ -96,9 +96,9 @@ program FatesTestLeafLevelPhoto
 
   ! sweep ranges
   real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
-  real(r8), parameter :: min_par  = 0.0_r8,    max_par  = 1600.0_r8,  par_inc  = 5.0_r8   ! [umol/m2/s]
+  real(r8), parameter :: min_par  = 0.0_r8,    max_par  = 2000.0_r8,  par_inc  = 5.0_r8   ! [umol/m2/s]
   real(r8), parameter :: min_vpd  = 500.0_r8,  max_vpd  = 2500.0_r8,  vpd_inc  = 20.0_r8  ! [Pa] (0.5-2.5 kPa)
-  real(r8), parameter :: min_co2  = 250.0_r8,  max_co2  = 1000.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
+  real(r8), parameter :: min_co2  = 50.0_r8,  max_co2  = 1500.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
   real(r8), parameter :: soilfrac_inc = 0.02_r8 ! [0-1]
 
   ! read in parameter file name from command line
