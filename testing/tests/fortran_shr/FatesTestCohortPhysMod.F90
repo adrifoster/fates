@@ -8,11 +8,21 @@ module FatesTestCohortPhysMod
   use FatesConstantsMod,           only : nearzero
   use FatesConstantsMod,           only : umolC_to_kgC
   use FatesConstantsMod,           only : wm2_to_umolm2s
+  use FatesConstantsMod,           only : g_per_kg
+  use FatesConstantsMod,           only : ihard_season_decid
+  use FatesConstantsMod,           only : ihard_stress_decid, isemi_stress_decid
+  use FatesConstantsMod,           only : ievergreen
+  use EDPftvarcon,                 only : EDPftvarcon_inst
+  use EDParamsMod,                 only : nclmax, nlevleaf
+  use EDParamsMod,                 only : GetNVegLayers
+  use EDParamsMod,                 only : dlower_vai, dinc_vai
+  use LeafBiophysicsMod,           only : DecayCoeffVcmax
   use FatesCohortMod,              only : fates_cohort_type
-  use FatesAllometryMod,           only : bleaf
+  use FatesAllometryMod,           only : bleaf, carea_allom, tree_lai_sai
+  use FatesAllometryMod,           only : bfineroot
   use FatesAllometryMod,           only : storage_fraction_of_target
   use PRTParametersMod,            only : prt_params
-  use PRTGenericMod,               only : store_organ, sapw_organ, fnrt_organ, carbon12_element
+  use PRTGenericMod,               only : store_organ, sapw_organ, fnrt_organ, carbon12_element, leaf_organ
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesPlantRespPhotosynthMod, only : NonleafMaintenanceRespiration
@@ -29,6 +39,7 @@ module FatesTestCohortPhysMod
   private
 
   integer,  parameter :: newton_max_iters = 10
+  real(r8), parameter :: decid_leaf_long_max = 1.0_r8
 
   type, public :: cohort_phys_type
 
@@ -155,7 +166,7 @@ contains
 
   subroutine IntegrateLeafLayers(cap_z, cohort, pft, env, parsun_z, parsha_z,  &
     laisun_z, laisha_z, gross_assim_sum, leaf_resp_sum, n_photo_calls,         &
-    n_bisection_calls, max_solve_iter, sum_solve_iter)
+    n_bisection_calls, max_solve_iter, sum_solve_iter, anet_z)
     !
     ! DESCRIPTION:
     ! Integrate leaf photosynthesis down this cohort's leaf layers at an
@@ -177,10 +188,11 @@ contains
     real(r8),                 intent(in)  :: laisha_z(:)     ! shaded LAI per leaf layer [m2 leaf/m2 crown footprint]
     real(r8),                 intent(out) :: gross_assim_sum ! whole-cohort gross assimilation [umolC/s]
     real(r8),                 intent(out) :: leaf_resp_sum   ! whole-cohort leaf dark respiration, before maintresp_reduction_factor [umolC/s]
-    integer, intent(inout), optional :: n_photo_calls     ! running count of LeafLayerPhotosynthesis calls
-    integer, intent(inout), optional :: n_bisection_calls ! running count of calls that fell back to CiBisection
-    integer, intent(inout), optional :: max_solve_iter    ! running max Ci-solver iteration count
-    integer, intent(inout), optional :: sum_solve_iter    ! running sum of Ci-solver iteration counts
+    integer,  intent(inout), optional :: n_photo_calls     ! running count of LeafLayerPhotosynthesis calls
+    integer,  intent(inout), optional :: n_bisection_calls ! running count of calls that fell back to CiBisection
+    integer,  intent(inout), optional :: max_solve_iter    ! running max Ci-solver iteration count
+    integer,  intent(inout), optional :: sum_solve_iter    ! running sum of Ci-solver iteration counts
+    real(r8), intent(out),   optional :: anet_z(:)         ! net assimilation by leaf layer
 
     ! LOCALS:
     integer  :: iv                          ! leaf-layer looping index
@@ -194,7 +206,8 @@ contains
 
     call GetCanopyGasParameters(env%can_press, env%can_o2_ppress, env%tempk,   &
       mm_kco2, mm_ko2, co2_cpoint)
-
+    
+    if (present(anet_z)) anet_z(:) = 0.0_r8
     gross_assim_sum = 0.0_r8
     leaf_resp_sum = 0.0_r8
     do iv = 1, cohort%nv
@@ -217,7 +230,8 @@ contains
       ! in this layer = layer's exposed LAI * the cohort's own crown area
       cohort_layer_eleaf_area = lai_layer * cohort%c_area
       gross_assim_sum = gross_assim_sum + psn_layer * cohort_layer_eleaf_area
-      leaf_resp_sum   = leaf_resp_sum   + cap_z(iv)%lmr * cohort_layer_eleaf_area
+      leaf_resp_sum = leaf_resp_sum + cap_z(iv)%lmr * cohort_layer_eleaf_area
+      if (present(anet_z)) anet_z(iv) = anet_layer
 
     end do
 
@@ -253,6 +267,7 @@ contains
     real(r8),                intent(out)   :: nonleaf_mr_tstep  ! this substep's non-leaf (stem/root) maintenance respiration [kgC/indiv/s]
 
     ! LOCALS:
+    real(r8) :: anet_z(nlevleaf)   ! per-leaf-layer net assimilation [umolC/m2 leaf/s]
     real(r8) :: gpp_sum, rdark_sum ! running per-substep GPP/dark-respiration accumulators [umolC/s]
 
     call RefreshCapacity(this, cohort, pft, env, lnc_top)
@@ -260,7 +275,10 @@ contains
     call IntegrateLeafLayers(this%cap_z, cohort, pft, env, light_env%parsun_z, &
       light_env%parsha_z, light_env%laisun_z, light_env%laisha_z, gpp_sum,     &
       rdark_sum, n_photo_calls, n_bisection_calls, max_solve_iter,             &
-      sum_solve_iter)
+      sum_solve_iter, anet_z)
+      
+    ! per-leaf-layer net uptake, for annual canopy trim 
+    cohort%ts_net_uptake(:) = anet_z(:) * umolC_to_kgC * step_size
 
     ! [umolC/s] -> [kgC/indiv/s]
     gpp_tstep = gpp_sum * umolC_to_kgC / cohort%n
@@ -367,5 +385,7 @@ contains
     end do
 
   end subroutine LeafNetAssimSweep
-
+  
+  ! ==========================================================================
+  
 end module FatesTestCohortPhysMod

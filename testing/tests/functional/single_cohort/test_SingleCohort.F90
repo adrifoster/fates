@@ -25,7 +25,6 @@ program FatesSingleCohort
   use EDParamsMod,                 only : nlevleaf
   use EDParamsMod,                 only : GetNVegLayers
   use EDPftvarcon,                 only : EDPftvarcon_inst
-  use FatesAllometryMod,           only : h2d_allom
   use FatesAllometryMod,           only : h_allom
   use FatesAllometryMod,           only : carea_allom
   use FatesAllometryMod,           only : bleaf
@@ -37,6 +36,7 @@ program FatesSingleCohort
   use FatesCohortMod,              only : fates_cohort_type
   use EDCanopyStructureMod,        only : UpdateCohortLAI
   use EDCohortDynamicsMod,         only : EvaluateAndCorrectDBH
+  use EDAccumulateFluxesMod,       only : AccumulateCohortNetUptake
   use PRTLossFluxesMod,            only : PRTMaintTurnover
   use PRTLossFluxesMod,            only : PRTPhenologyFlush
   use PRTLossFluxesMod,            only : PRTDeciduousTurnover
@@ -57,6 +57,7 @@ program FatesSingleCohort
   use FatesTestCohortPhysMod,      only : cohort_phys_type
   use FatesSingleCohortHistoryMod, only : history_type
   use FatesTestLeafPhotoMod,       only : LeafNitrogenContent
+  use EDPhysiologyMod,             only : TrimCohortCanopy
   use LeafBiophysicsMod,           only : lb_params
   use LeafBiophysicsMod,           only : FvCB1980, medlyn_model
   use LeafBiophysicsMod,           only : net_assim_model, photosynth_acclim_model_kumarathunge_etal_2019
@@ -71,8 +72,6 @@ program FatesSingleCohort
   type(history_type)            :: hist                    ! output accumulator/writer, shared across the light sweep
   real(r8), allocatable         :: light_frac(:)           ! swept incident light fractions [0-1]
   real(r8), allocatable         :: diagnostic_ppfd(:)      ! swept PPFD values for LightResponseSweep [umol/m2/s]
-  real(r8)                      :: dbh_recruit             ! recruitment-size dbh [cm]
-  real(r8)                      :: cohort_n                ! cohort density [stems/m2]
   real(r8)                      :: lnc_top                 ! leaf N content at the canopy top [gN/m2 leaf]
   real(r8)                      :: par_absorptance         ! PFT fractional PAR absorptance, 1 - rhol(ipar) - taul(ipar) [-]
   integer                       :: ilight                  ! fractional light level looping index
@@ -88,6 +87,7 @@ program FatesSingleCohort
   ! CONSTANTS:
   integer,                     parameter :: pft = 1                         ! plant functional type to simulate
   real(r8),                    parameter :: patch_area = 1.0e4_r8           ! reference ground area the cohort occupies [m2]
+  real(r8),                    parameter :: cohort_n = 1.0_r8               ! individuals in the cohort [indiv]
   real(r8),                    parameter :: coh_age = 0.0_r8                ! cohort age
   real(r8),                    parameter :: site_spread = 1.0_r8            ! site spread index
   integer,                     parameter :: leaf_on_doy = 60                ! prescribed leaf on day of year (for cold deciduous PFTs)
@@ -97,11 +97,11 @@ program FatesSingleCohort
   real(r8),                    parameter :: light_frac_max = 1.0_r8         ! highest incident light fraction swept [fraction of full sun]
   integer,                     parameter :: n_ppfd_diagnostic = 40          ! number of PPFD values to sweep
   real(r8),                    parameter :: ppfd_diagnostic_min = 0.01_r8   ! lowest swept PPFD [umol/m2/s]
-  real(r8),                    parameter :: ppfd_diagnostic_max = 2000.0_r8 ! highest swept PPFD [umol/m2/s] (~full sun)
+  real(r8),                    parameter :: ppfd_diagnostic_max = 2500.0_r8 ! highest swept PPFD [umol/m2/s] (~full sun)
   integer,                     parameter :: leaf_lcp_layer = 1              ! canopy layer swept for the leaf-level (LCPleaf) diagnostic
   integer,                     parameter :: days_per_year = 365             ! days per simulated year
   integer,                     parameter :: n_substeps_per_day = 48         ! sub-daily steps per day (half-hourly), must be even
-  integer,                     parameter :: nyears = 30                     ! number of years to simulate
+  integer,                     parameter :: nyears = 2                     ! number of years to simulate
   
   ! timing calculations
   real(r8), parameter :: step_size = 86400.0_r8/n_substeps_per_day ! model time step [s]
@@ -173,10 +173,6 @@ program FatesSingleCohort
   ! used to normalize light_intercept_eff (see RunOneLightLevel) to a 
   ! zero-self-shading asymptote of 1.0
   par_absorptance = 1.0_r8 - EDPftvarcon_inst%rhol(pft,ipar) - EDPftvarcon_inst%taul(pft,ipar)
-
-  ! recruitment-size initialization
-  call h2d_allom(EDPftvarcon_inst%hgt_min(pft), pft, dbh_recruit)
-  cohort_n = EDPftvarcon_inst%initd(pft)*patch_area
 
   ! build the log-spaced incident light fractions to sweep
   allocate(light_frac(n_light_levels))
@@ -262,6 +258,7 @@ contains
     real(r8)                         :: maintresp_reduction_factor                ! one days's storage-based maintenance-respiration factor [0-1]
     real(r8)                         :: mean_solve_iter                           ! this light level's mean Ci-solver iteration count (sum_solve_iter/n_photo_calls), computed once at the end of this trajectory
     real(r8)                         :: lai_above                                 ! lai above the cohort
+    real(r8)                         :: init_dbh                                  ! initial dbh of cohort [cm]
     integer                          :: iyear, iday                               ! year/day looping indices
     integer                          :: iday_all                                  ! day index within this light level's trajectory (1..n_days_total)
     integer                          :: isubday                                   ! sub-daily looping index
@@ -275,7 +272,10 @@ contains
     
     ! CONSTANTS:
     real(r8) :: k = 0.5_r8 ! extinction coefficient for deriving canopy_layer_tlai
+    real(r8) :: max_lai = 4.0_r8
     
+    init_dbh = EDPftvarcon_inst%initdbh(pft)
+
     ! set counters
     n_photo_calls = 0
     n_bisection_calls = 0
@@ -284,13 +284,16 @@ contains
     
     ! determine and set can_tlai
     can_tlai(:) = 0.0_r8 ! first set everything to 0.0
-    if (light_frac_val == 1.0_r8) then 
+    !cohort_can_layer = 1
+    if (ilight == n_light_levels) then 
       ! canopy tree
       cohort_can_layer = 1
       lai_above = 0.0_r8
     else
       cohort_can_layer = 2
       lai_above = -1.0_r8 * log(light_frac_val)/k
+      if (lai_above > max_lai) lai_above = max_lai
+      if (lai_above < 0.0_r8) lai_above = 0.0_r8
     end if 
 
     can_tlai(1) = lai_above
@@ -299,8 +302,8 @@ contains
 
     ! create a new cohort at recruitment size
     allocate(cohort)
-    call CohortFactory(cohort, pft, can_tlai, dbh=dbh_recruit, number=cohort_n,     &
-      patch_area=patch_area, age=coh_age, site_spread=site_spread,                  &
+    call CohortFactory(cohort, pft, can_tlai, dbh=init_dbh, number=cohort_n,  &
+      patch_area=patch_area, age=coh_age, site_spread=site_spread,            &
       canopy_layer=cohort_can_layer)
     cohort%nv = GetNVegLayers(cohort%treelai + cohort%treesai)
 
@@ -320,10 +323,19 @@ contains
     
     ! loop on years and days
     year_loop: do iyear = 1, nyears
+            
       day_loop: do iday = 1, days_per_year
 
         iday_all = (iyear - 1)*days_per_year + iday
 
+        ! zero the daily allocation/turnover accumulators - matches EDMainMod.F90's
+        ! ZeroAllocationRates
+        call cohort%prt%ZeroRates()
+        cohort%gpp_acc = 0.0_r8
+        cohort%resp_m_acc = 0.0_r8
+        cohort%sym_nfix_daily = 0.0_r8
+        cohort%c13disc_acc = 0.0_r8
+        
         daily_net_c = 0.0_r8
         daily_gpp = 0.0_r8
         daily_rdark = 0.0_r8
@@ -365,6 +377,9 @@ contains
           call phys%SubdailyStep(cohort, pft, env, light_env, lnc_top, step_size,  &
             n_photo_calls, n_bisection_calls, max_solve_iter, sum_solve_iter,      &
             gpp_tstep, rdark_tstep, nonleaf_mr_tstep)
+          
+          ! accumulate the net carbon uptake
+          call AccumulateCohortNetUptake(cohort)
           
           ! accumulate absorbed and incident PAR, both per unit crown footprint
           if (light_env%treelai > nearzero) then
@@ -432,6 +447,11 @@ contains
           cohort%crowndamage, cohort%c_area)
         call UpdateCohortLAI(cohort, can_tlai, patch_area)
         call light_env%Refresh(cohort%treelai, cohort%treesai, cohort%height)
+        
+        ! annual canopy trimming
+        if (iday == days_per_year - 1) then 
+          call TrimCohortCanopy(cohort, site_spread, can_tlai)
+        end if 
 
         ! capture today's daily time series row
         call hist%RecordDay(iday_all, ilight, cohort, daily_net_c, daily_gpp,      &
@@ -449,7 +469,7 @@ contains
         end if 
 
       end do day_loop
-
+      
       storage_c = cohort%prt%GetState(store_organ, carbon12_element)
 
     end do year_loop
@@ -793,9 +813,7 @@ contains
 
     ! Euler step on cohort number density: dn/dt = -cmort*n [indiv/year],
     ! stepped by 1/days_per_year - matches EDMainMod.F90's
-    ! cohort%n = max(0, n + dndt*hlm_freq_day). No disturbance mechanism
-    ! exists in this patch-less driver, so the full rate is applied directly
-    ! to n 
+    ! cohort%n = max(0, n + dndt*hlm_freq_day)
     cohort%n = max(0.0_r8, cohort%n * (1.0_r8 - cmort/real(days_per_year, r8)))
 
   end subroutine DailyGrowthAndMortality

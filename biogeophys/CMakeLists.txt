@@ -3,6 +3,7 @@ list(APPEND fates_sources
   LeafBiophysicsMod.F90
   FatesLeafBiophysParamsMod.F90
   FatesPlantHydraulicsMod.F90
+  EDAccumulateFluxesMod.F90
   FatesPlantRespPhotosynthMod.F90)
 
 sourcelist_to_parent(fates_sources)

@@ -3,6 +3,7 @@ list(APPEND fates_sources
   FatesLitterMod.F90
   FatesCohortMod.F90
   FatesAllometryMod.F90
+  EDPhysiologyMod.F90
   DamageMainMod.F90
   EDCohortDynamicsMod.F90
   FatesPatchMod.F90

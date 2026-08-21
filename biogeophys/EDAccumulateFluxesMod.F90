@@ -14,12 +14,14 @@ module EDAccumulateFluxesMod
   use shr_log_mod , only      : errMsg => shr_log_errMsg
   use FatesConstantsMod , only : r8 => fates_r8
   use FatesConstantsMod , only : nocomp_bareground
+  use FatesCohortMod,     only : fates_cohort_type
 
   implicit none
   private
   !
   public :: AccumulateFluxes_ED
-
+  public :: AccumulateCohortNetUptake
+  
   logical :: debug = .false.  ! for debugging this module
 
   character(len=*), parameter, private :: sourcefile = &
@@ -75,30 +77,8 @@ contains
              if( bc_in(s)%filter_photo_pa(ifp) == 3 ) then
                 ccohort => cpatch%shortest
                 do while(associated(ccohort))
-
-                   ! Accumulate fluxes from hourly to daily values. 
-                   ! _tstep fluxes are KgC/indiv/timestep _acc are KgC/indiv/day
-
-                   ccohort%gpp_acc  = ccohort%gpp_acc  + ccohort%gpp_tstep 
-                   ccohort%resp_m_acc = ccohort%resp_m_acc + ccohort%resp_m_tstep
-
-                   ccohort%sym_nfix_daily = ccohort%sym_nfix_daily + ccohort%sym_nfix_tstep
-                   
-                   ! weighted mean of D13C by gpp
-                   if((ccohort%gpp_acc + ccohort%gpp_tstep) .eq. 0.0_r8) then
-                      ccohort%c13disc_acc = 0.0_r8
-                   else
-                      ccohort%c13disc_acc  = ((ccohort%c13disc_acc * ccohort%gpp_acc) + &
-                           (ccohort%c13disc_clm * ccohort%gpp_tstep)) / &
-                           (ccohort%gpp_acc + ccohort%gpp_tstep)
-                   endif
-
-                   do iv=1,ccohort%nv
-                      if(ccohort%year_net_uptake(iv) == 999._r8)then ! note that there were leaves in this layer this year. 
-                         ccohort%year_net_uptake(iv) = 0._r8
-                      end if
-                      ccohort%year_net_uptake(iv) = ccohort%year_net_uptake(iv) + ccohort%ts_net_uptake(iv)
-                   enddo
+                
+                  call AccumulateCohortNetUptake(ccohort)
 
                    ccohort => ccohort%taller
                 enddo ! while(associated(ccohort))
@@ -111,6 +91,41 @@ contains
     return
 
   end subroutine AccumulateFluxes_ED
+  
+  subroutine AccumulateCohortNetUptake(ccohort)
+   !
+   ! DESCRIPTION:
+   ! Accumulate fluxes from hourly to daily values for a single cohort
+   ! _tstep fluxes are KgC/indiv/timestep _acc are KgC/indiv/day
+   
+   ! ARGUMENTS:
+   type(fates_cohort_type), intent(inout) :: ccohort 
+   
+   ! LOCALS:
+   integer :: iv
+
+   ccohort%gpp_acc  = ccohort%gpp_acc  + ccohort%gpp_tstep 
+   ccohort%resp_m_acc = ccohort%resp_m_acc + ccohort%resp_m_tstep
+
+   ccohort%sym_nfix_daily = ccohort%sym_nfix_daily + ccohort%sym_nfix_tstep
+
+   ! weighted mean of D13C by gpp
+   if((ccohort%gpp_acc + ccohort%gpp_tstep) .eq. 0.0_r8) then
+      ccohort%c13disc_acc = 0.0_r8
+   else
+      ccohort%c13disc_acc  = ((ccohort%c13disc_acc * ccohort%gpp_acc) + &
+         (ccohort%c13disc_clm * ccohort%gpp_tstep)) / &
+         (ccohort%gpp_acc + ccohort%gpp_tstep)
+   endif
+
+   do iv=1, ccohort%nv
+      if(ccohort%year_net_uptake(iv) == 999._r8)then ! note that there were leaves in this layer this year. 
+         ccohort%year_net_uptake(iv) = 0._r8
+      end if
+         ccohort%year_net_uptake(iv) = ccohort%year_net_uptake(iv) + ccohort%ts_net_uptake(iv)
+   enddo
+  
+  end subroutine AccumulateCohortNetUptake
 
 end module EDAccumulateFluxesMod
 
