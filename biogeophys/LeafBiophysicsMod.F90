@@ -49,6 +49,7 @@ module LeafBiophysicsMod
   public :: GetCanopyGasParameters
   public :: LeafLayerMaintenanceRespiration_Ryan_1991
   public :: LeafLayerMaintenanceRespiration_Atkin_etal_2017
+  public :: NegativeRdarkTempC
   public :: LeafLayerBiophysicalRates
   public :: LowstorageMainRespReduction
   public :: GetConstrainedVPress
@@ -1820,6 +1821,29 @@ contains
          ((veg_tempk-tfrz)**2 - lmr_TrefC**2))
 
   end subroutine LeafLayerMaintenanceRespiration_Atkin_etal_2017
+
+  ! ====================================================================================
+
+  function NegativeRdarkTempC(ft, lnc_top) result(neg_lmr_tempC)
+
+    ! -----------------------------------------------------------------------
+    ! Growth temperature above which the Atkin et al. (2017) reference dark
+    ! respiration r_t_ref turns negative and is capped at zero. Solves the
+    ! bracketed term of r_t_ref in
+    ! LeafLayerMaintenanceRespiration_Atkin_etal_2017 for tgrowth.
+    !
+    ! rdark_scaler multiplies the whole bracket and so cannot change its sign:
+    ! this canopy-top threshold applies to every leaf layer.
+
+    ! Arguments
+    integer,  intent(in) :: ft            ! (plant) Functional Type Index
+    real(r8), intent(in) :: lnc_top       ! Leaf nitrogen content per unit area at canopy top [gN/m2]
+    real(r8)             :: neg_lmr_tempC ! temperature at which lmr would go negative (degrees C)
+
+    neg_lmr_tempC = -1._r8 * (lb_params%maintresp_leaf_atkin2017_baserate(ft) + &
+         lmr_r_1 * lnc_top) / lmr_r_2
+
+  end function NegativeRdarkTempC
 
   ! ====================================================================================
 

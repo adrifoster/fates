@@ -26,6 +26,7 @@ program FatesTestLeafLevelPhoto
   use PRTInitParamsFatesMod,       only : PRTDerivedParams
   use FatesParameterDerivedMod,    only : param_derived
   use FatesUnitTestParamReaderMod, only : ReadParameters
+  use FatesUnitTestParamReaderMod, only : CheckLeafRespParams
   use FatesArgumentUtils,          only : command_line_arg
   use FatesFactoryMod,             only : InitializeGlobals
   use FatesGlobals,                only : FatesGlobalsInit
@@ -39,6 +40,7 @@ program FatesTestLeafLevelPhoto
   use LeafBiophysicsMod,           only : QSat
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestEnvironmentMod,     only : default_vpd, default_nscaler, default_par
+  use FatesTestEnvironmentMod,     only : default_rdark_scaler
   use FatesTestEnvironmentMod,     only : default_veg_tempk
   use FatesTestEnvironmentMod,     only : BtranFromSMP, SoilMatricPotential
   use FatesTestEnvironmentMod,     only : CanopyVaporPressure
@@ -88,11 +90,13 @@ program FatesTestLeafLevelPhoto
 
   integer :: n_par, n_co2, n_vpd, n_temp, n_soilfrac ! sweep array sizes
   integer :: i ! looping index
+  integer :: target_pft ! PFT to use
   
   character(len=:), allocatable :: out_file ! output file name
+  character(len=:), allocatable :: pft_arg  ! command-line pft argument
   
   ! CONSTANTS:
-  integer, parameter :: target_pft = 1 ! PFT index to evaluate (1-based)
+  integer, parameter :: default_pft = 1 ! default PFT index to evaluate (1-based)
 
   ! sweep ranges
   real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
@@ -111,6 +115,13 @@ program FatesTestLeafLevelPhoto
     out_file = 'leaf_level_photo_out.nc'
   end if
   
+  ! pft, depends on either arg3 or is just default
+  if (command_argument_count() >= 3) then 
+    pft_arg = command_line_arg(3)
+    read(pft_arg,*) target_pft
+  else 
+    target_pft = default_pft
+  end if 
   call ReadParameters(param_file)
 
   smpsc = EDPftvarcon_inst%smpsc(target_pft)
@@ -127,6 +138,10 @@ program FatesTestLeafLevelPhoto
   lb_params%stomatal_model = medlyn_model
   lb_params%stomatal_assim_model = net_assim_model
   lb_params%photo_tempsens_model = photosynth_acclim_model_kumarathunge_etal_2019
+
+  ! report the Atkin et al. (2017) parameter check production runs via
+  ! FatesCheckParams (a no-op unless that model is selected above)
+  call CheckLeafRespParams()
 
   ! leaf N content for target_pft - constant for the whole run
   lnc_top = LeafNitrogenContent(target_pft)
@@ -193,8 +208,9 @@ program FatesTestLeafLevelPhoto
     call EvaluateLeafPhotosynthesis(target_pft, par_vals(i), env%tempk,   &
       env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
       env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
-      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
-      kp25top, lnc_top, agross_bypar(i), anet_bypar(i), gs_bypar(i), ci_bypar(i))
+      default_nscaler, default_rdark_scaler, env%dayl_factor, env%btran,   &
+      vcmax25top, jmax25top, kp25top, lnc_top, agross_bypar(i),             &
+      anet_bypar(i), gs_bypar(i), ci_bypar(i))
   end do
 
   ! ---------------------------------------------------------------------
@@ -204,8 +220,9 @@ program FatesTestLeafLevelPhoto
     call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
       env%tempk, env%tempk, env%can_press, co2_vals(i),                   &
       env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,    &
-      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
-      kp25top, lnc_top, agross_byco2(i), anet_byco2(i), gs_byco2(i), ci_byco2(i))
+      default_nscaler, default_rdark_scaler, env%dayl_factor, env%btran,   &
+      vcmax25top, jmax25top, kp25top, lnc_top, agross_byco2(i),             &
+      anet_byco2(i), gs_byco2(i), ci_byco2(i))
   end do
 
   ! ---------------------------------------------------------------------
@@ -217,8 +234,9 @@ program FatesTestLeafLevelPhoto
     call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,   &
       env%tempk, env%tempk, env%can_press, env%can_co2_ppress,            &
       env%can_o2_ppress, default_veg_esat, can_vpress_byvpd(i), env%gb,   &
-      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top, &
-      kp25top, lnc_top, agross_byvpd(i), anet_byvpd(i), gs_byvpd(i), ci_byvpd(i))
+      default_nscaler, default_rdark_scaler, env%dayl_factor, env%btran,   &
+      vcmax25top, jmax25top, kp25top, lnc_top, agross_byvpd(i),             &
+      anet_byvpd(i), gs_byvpd(i), ci_byvpd(i))
   end do
 
   ! ---------------------------------------------------------------------
@@ -232,8 +250,9 @@ program FatesTestLeafLevelPhoto
     call EvaluateLeafPhotosynthesis(target_pft, default_par, temp_vals(i),     &
       env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                 &
       env%can_o2_ppress, veg_esat_bytemp(i), can_vpress_bytemp(i), env%gb,     &
-      default_nscaler, env%dayl_factor, env%btran, vcmax25top, jmax25top,      &
-      kp25top, lnc_top, agross_bytemp(i), anet_bytemp(i), gs_bytemp(i), ci_bytemp(i))
+      default_nscaler, default_rdark_scaler, env%dayl_factor, env%btran,        &
+      vcmax25top, jmax25top, kp25top, lnc_top, agross_bytemp(i),                 &
+      anet_bytemp(i), gs_bytemp(i), ci_bytemp(i))
   end do
 
   ! ---------------------------------------------------------------------
@@ -246,9 +265,9 @@ program FatesTestLeafLevelPhoto
     call EvaluateLeafPhotosynthesis(target_pft, default_par, env%tempk,             &
       env%tempk, env%tempk, env%can_press, env%can_co2_ppress,                      &
       env%can_o2_ppress, default_veg_esat, default_can_vpress, env%gb,              &
-      default_nscaler, env%dayl_factor, btran_bysoilfrac(i), vcmax25top, jmax25top, &
-      kp25top, lnc_top, agross_bysoilfrac(i), anet_bysoilfrac(i), gs_bysoilfrac(i), &
-      ci_bysoilfrac(i))
+      default_nscaler, default_rdark_scaler, env%dayl_factor,                       &
+      btran_bysoilfrac(i), vcmax25top, jmax25top, kp25top, lnc_top,                  &
+      agross_bysoilfrac(i), anet_bysoilfrac(i), gs_bysoilfrac(i), ci_bysoilfrac(i))
   end do
   
   ! ---------------------------------------------------------------------------------------

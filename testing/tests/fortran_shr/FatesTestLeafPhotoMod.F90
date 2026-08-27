@@ -13,10 +13,12 @@ module FatesTestLeafPhotoMod
   use LeafBiophysicsMod,           only : GetCanopyGasParameters
   use LeafBiophysicsMod,           only : LeafLayerBiophysicalRates
   use LeafBiophysicsMod,           only : LeafLayerMaintenanceRespiration_Ryan_1991
+  use LeafBiophysicsMod,           only : LeafLayerMaintenanceRespiration_Atkin_etal_2017
   use LeafBiophysicsMod,           only : LeafLayerPhotosynthesis
   use LeafBiophysicsMod,           only : DecayCoeffVcmax
   use FatesPlantRespPhotosynthMod, only : ConvertPar
   use FatesAllometryMod,           only : VegAreaLayer
+  use EDPftvarcon,                 only : EDPftvarcon_inst
   use PRTParametersMod,            only : prt_params
   use PRTGenericMod,               only : leaf_organ
 
@@ -55,7 +57,7 @@ module FatesTestLeafPhotoMod
   public :: LeafLayerSunShade
   public :: EvaluateLeafPhotosynthesis
   public :: LeafNitrogenContent
-  public :: LeafLayerNitrogenScaling
+  public :: LeafLayerVerticalScaling
   public :: SunlitFraction
 
 contains
@@ -65,9 +67,9 @@ contains
   function LeafNitrogenContent(pft) result(lnc_top)
     !
     ! DESCRIPTION:
-    ! Leaf nitrogen content at the canopy top [gN/m2 leaf], needed by
-    ! LeafLayerMaintenanceRespiration_Ryan_1991. Requires PRTDerivedParams() to have 
-    ! already populated prt_params%organ_param_id 
+    ! Leaf nitrogen content at the canopy top [gN/m2 leaf], needed by both leaf
+    ! maintenance respiration models. Requires PRTDerivedParams() to have
+    ! already populated prt_params%organ_param_id
 
     ! ARGUMENTS:
     integer, intent(in) :: pft ! plant functional type index
@@ -84,19 +86,20 @@ contains
   
   subroutine EvaluateLeafPhotosynthesis(pft, par_abs, veg_tempk, t_growth, t_home, &
     can_press, can_co2_ppress, can_o2_ppress, veg_esat, can_vpress, gb, nscaler,   &
-    dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, agross, anet, gs, ci)
+    rdark_scaler, dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top,     &
+    agross, anet, gs, ci)
     !
     ! DESCRIPTION:
     ! Evaluates leaf-level photosynthesis at arbitrary prescribed driver
     ! conditions. This reproduces the full current production call sequence:
     !
     !   GetCanopyGasParameters -> LeafLayerBiophysicalRates ->
-    !   LeafLayerMaintenanceRespiration_Ryan_1991 -> LeafLayerPhotosynthesis
+    !   LeafLayerMaintenanceRespiration_* -> LeafLayerPhotosynthesis
     !
     ! lb_params' model switches (electron_transport_model, stomatal_model,
-    ! stomatal_assim_model, photo_tempsens_model) are HLM-namelist-controlled
-    ! in production and so are not set by any call in this module. The
-    ! calling driver must set them explicitly
+    ! stomatal_assim_model, photo_tempsens_model) and hlm_maintresp_leaf_model
+    ! are HLM-namelist-controlled in production and so are not set by any call
+    ! in this module. The calling driver must set them explicitly
   
     ! ARGUMENTS:
     integer,  intent(in)  :: pft            ! plant functional type index
@@ -111,6 +114,7 @@ contains
     real(r8), intent(in)  :: can_vpress     ! vapor pressure of the canopy air [Pa]
     real(r8), intent(in)  :: gb             ! leaf boundary layer conductance [umol/m2/s]
     real(r8), intent(in)  :: nscaler        ! leaf nitrogen vertical-scaling factor [0-1]
+    real(r8), intent(in)  :: rdark_scaler   ! leaf respiration vertical-scaling factor [0-1], Atkin only
     real(r8), intent(in)  :: dayl_factor    ! day-length photosynthetic-capacity acclimation factor [0-1]
     real(r8), intent(in)  :: btran          ! soil moisture stress factor [0-1]
     real(r8), intent(in)  :: vcmax25top     ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
@@ -130,8 +134,9 @@ contains
 
     call GetCanopyGasParameters(can_press, can_o2_ppress, veg_tempk, mm_kco2, mm_ko2, co2_cpoint)
 
-    call LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler, dayl_factor, &
-      btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
+    call LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler,             &
+      rdark_scaler, dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top,  &
+      cap)
 
     call LeafLayerPhotosynthesis(par_abs, pft, cap%vcmax, cap%jmax, cap%kp,       &
       cap%gs0, cap%gs1, cap%gs2, veg_tempk, can_press, can_co2_ppress,            &
@@ -143,11 +148,18 @@ contains
   ! ==========================================================================
 
   subroutine LeafLayerCapacity(pft, veg_tempk, t_growth, t_home, nscaler,         &
-    dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
+    rdark_scaler, dayl_factor, btran, vcmax25top, jmax25top, kp25top, lnc_top, cap)
     !
     ! DESCRIPTION:
     ! One leaf layer's photosynthetic capacity and dark respiration at the given
     ! leaf conditions
+    !
+    ! The leaf maintenance respiration model is selected by
+    ! hlm_maintresp_leaf_model, which is HLM-namelist-controlled in production
+    ! and so must be set explicitly by the calling driver
+    !
+    ! t_growth doubles as the Atkin et al. (2017) acclimation temperature, the
+    ! same quantity production passes there (currentPatch%tveg_lpa%GetMean())
     !
 
     ! ARGUMENTS:
@@ -156,6 +168,7 @@ contains
     real(r8), intent(in)  :: t_growth            ! 10-day running-mean growth temperature [K]
     real(r8), intent(in)  :: t_home              ! long-term running-mean home temperature [K]
     real(r8), intent(in)  :: nscaler             ! leaf nitrogen vertical-scaling factor [0-1]
+    real(r8), intent(in)  :: rdark_scaler        ! leaf respiration vertical-scaling factor [0-1], Atkin only
     real(r8), intent(in)  :: dayl_factor         ! day-length photosynthetic-capacity acclimation factor [0-1]
     real(r8), intent(in)  :: btran               ! soil moisture stress factor [0-1]
     real(r8), intent(in)  :: vcmax25top          ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
@@ -167,19 +180,44 @@ contains
     call LeafLayerBiophysicalRates(pft, vcmax25top, jmax25top, kp25top, nscaler,   &
       veg_tempk, dayl_factor, t_growth, t_home, btran, cap%vcmax, cap%jmax,       &
       cap%kp, cap%gs0, cap%gs1, cap%gs2)
-      
-    call LeafLayerMaintenanceRespiration_Ryan_1991(lnc_top, nscaler, pft, veg_tempk, cap%lmr)
-    
+
+    select case (hlm_maintresp_leaf_model)
+
+    case (lmrmodel_ryan_1991)
+
+      call LeafLayerMaintenanceRespiration_Ryan_1991(lnc_top, nscaler, pft,      &
+        veg_tempk, cap%lmr)
+
+    case (lmrmodel_atkin_etal_2017)
+
+      call LeafLayerMaintenanceRespiration_Atkin_etal_2017(lnc_top,              &
+        rdark_scaler, pft, veg_tempk, t_growth, cap%lmr)
+
+    case default
+
+      write(*,*) 'LeafLayerCapacity: unrecognized leaf respiration model: ',     &
+        hlm_maintresp_leaf_model
+      error stop
+
+    end select
+
   end subroutine LeafLayerCapacity
   
   ! ==========================================================================
   
-  subroutine LeafLayerNitrogenScaling(treelai, treesai, height, nv, pft,        &
-    vcmax25top, lai_above_in, nscaler_z)
+  subroutine LeafLayerVerticalScaling(treelai, treesai, height, nv, pft,        &
+    vcmax25top, lai_above_in, nscaler_z, rdark_scaler_z)
     !
     ! DESCRIPTION:
-    ! Per-leaf-layer nitrogen-scaling factor (nscaler), the vertical decay of
-    ! photosynthetic capacity with cumulative leaf area above a layer 
+    ! Per-leaf-layer vertical-scaling factors, the decay of photosynthetic
+    ! capacity (nscaler) and of leaf maintenance respiration (rdark_scaler)
+    ! with cumulative leaf area above a layer
+    !
+    ! Both profiles share the same cumulative LAI and differ only in their
+    ! decay coefficient: nscaler follows leafn_vert_scaler_coeff1/2 and
+    ! rdark_scaler follows maintresp_leaf_vert_scaler_coeff1/2. rdark_scaler
+    ! is used by the Atkin et al. (2017) respiration model only, and is
+    ! computed regardless of which model is selected
     !
     ! Depends only on canopy structure (treelai/treesai/height/nv) and the
     ! reference canopy-top capacity
@@ -188,14 +226,15 @@ contains
     !
 
     ! ARGUMENTS:
-    real(r8), intent(in)  :: treelai      ! in-crown leaf area index [m2 leaf/m2 crown footprint]
-    real(r8), intent(in)  :: treesai      ! in-crown stem area index [m2 stem/m2 crown footprint]
-    real(r8), intent(in)  :: height       ! plant/canopy height [m]
-    real(r8), intent(in)  :: lai_above_in ! lai above the cohort
-    integer,  intent(in)  :: nv           ! number of occupied leaf layers
-    integer,  intent(in)  :: pft          ! plant functional type index
-    real(r8), intent(in)  :: vcmax25top   ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
-    real(r8), intent(out) :: nscaler_z(:) ! per-leaf-layer nitrogen-scaling factor [0-1], first nv entries filled
+    real(r8), intent(in)  :: treelai           ! in-crown leaf area index [m2 leaf/m2 crown footprint]
+    real(r8), intent(in)  :: treesai           ! in-crown stem area index [m2 stem/m2 crown footprint]
+    real(r8), intent(in)  :: height            ! plant/canopy height [m]
+    real(r8), intent(in)  :: lai_above_in      ! lai above the cohort
+    integer,  intent(in)  :: nv                ! number of occupied leaf layers
+    integer,  intent(in)  :: pft               ! plant functional type index
+    real(r8), intent(in)  :: vcmax25top        ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
+    real(r8), intent(out) :: nscaler_z(:)      ! per-leaf-layer nitrogen-scaling factor [0-1], first nv entries filled
+    real(r8), intent(out) :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1], first nv entries filled
 
     ! LOCALS:
     integer  :: iv                     ! leaf-layer looping index
@@ -204,6 +243,7 @@ contains
     real(r8) :: cumulative_lai         ! LAI above the middle of the current leaf layer
     real(r8) :: lai_above              ! running LAI above the current leaf layer
     real(r8) :: kn                     ! nitrogen vertical-scaling decay coefficient
+    real(r8) :: kn_rdark               ! respiration vertical-scaling decay coefficient
 
     real(r8), parameter :: snow_depth = 0.0_r8 ! no snow modeled in any standalone test driver [m]
 
@@ -211,7 +251,10 @@ contains
     ! capacity, neither of which varies by layer
     kn = DecayCoeffVcmax(vcmax25top, prt_params%leafn_vert_scaler_coeff1(pft), &
       prt_params%leafn_vert_scaler_coeff2(pft))
-    
+    kn_rdark = DecayCoeffVcmax(vcmax25top,                                    &
+      EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff1(pft),                &
+      EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff2(pft))
+
     lai_above = lai_above_in
     do iv = 1, nv
       call VegAreaLayer(treelai, treesai, height, iv, nv, pft, snow_depth,     &
@@ -219,9 +262,10 @@ contains
       cumulative_lai = lai_above + 0.5_r8*elai_layer
       lai_above = lai_above + elai_layer
       nscaler_z(iv) = exp(-kn*cumulative_lai)
+      rdark_scaler_z(iv) = exp(-kn_rdark*cumulative_lai)
     end do
 
-  end subroutine LeafLayerNitrogenScaling
+  end subroutine LeafLayerVerticalScaling
   
   ! ==========================================================================
 

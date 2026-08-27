@@ -32,7 +32,7 @@ module FatesTestCohortPhysMod
   use FatesTestLeafPhotoMod,       only : leaf_capacity_type
   use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
   use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
-  use FatesTestLeafPhotoMod,       only : LeafLayerNitrogenScaling
+  use FatesTestLeafPhotoMod,       only : LeafLayerVerticalScaling
   use FatesTestLeafPhotoMod,       only : ci_tol
   
   implicit none
@@ -47,6 +47,7 @@ module FatesTestCohortPhysMod
 
     type(leaf_capacity_type), allocatable :: cap_z(:)     ! per-leaf-layer photosynthetic capacity, stomatal conductance terms and dark respiration
     real(r8),                 allocatable :: nscaler_z(:) ! per-leaf-layer nitrogen-scaling factor [0-1]
+    real(r8),                 allocatable :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1]
     real(r8)                              :: live_stem_n  ! aboveground sawpood N [kgN/plant]
     real(r8)                              :: live_croot_n ! belowground sapwood N [kgN/plant]
     real(r8)                              :: fnrt_n       ! fine root N [kgN/plant]
@@ -77,11 +78,11 @@ contains
 
     if (allocated(this%cap_z)) then
       if (size(this%cap_z) /= nv) then
-        deallocate(this%cap_z, this%nscaler_z)
-        allocate(this%cap_z(nv), this%nscaler_z(nv))
+        deallocate(this%cap_z, this%nscaler_z, this%rdark_scaler_z)
+        allocate(this%cap_z(nv), this%nscaler_z(nv), this%rdark_scaler_z(nv))
       end if
     else
-      allocate(this%cap_z(nv), this%nscaler_z(nv))
+      allocate(this%cap_z(nv), this%nscaler_z(nv), this%rdark_scaler_z(nv))
     end if
 
   end subroutine EnsureAllocated
@@ -92,8 +93,9 @@ contains
     !
     ! DESCRIPTION:
     ! Calculate a daily setup: storage-based maintenance-respiration factor,
-    ! sapwood/fine-root N, and per-leaf-layer nitrogen-scaling factor (nscaler_z depends on
-    ! cumulative LAI above each layer, which only changes daily)
+    ! sapwood/fine-root N, and the per-leaf-layer vertical-scaling factors
+    ! (nscaler_z/rdark_scaler_z depend on cumulative LAI above each layer,
+    ! which only changes daily)
     !
 
     ! ARGUMENTS:
@@ -129,8 +131,9 @@ contains
 
     call EnsureAllocated(this, cohort%nv)
 
-    call LeafLayerNitrogenScaling(cohort%treelai, cohort%treesai,              &
-      cohort%height, cohort%nv, pft, cohort%vcmax25top, lai_above, this%nscaler_z)
+    call LeafLayerVerticalScaling(cohort%treelai, cohort%treesai,              &
+      cohort%height, cohort%nv, pft, cohort%vcmax25top, lai_above,             &
+      this%nscaler_z, this%rdark_scaler_z)
 
   end subroutine DailySetup
 
@@ -140,7 +143,7 @@ contains
     !
     ! DESCRIPTION:
     ! Refresh every leaf layer's temperature-dependent capacity and dark
-    ! respiration from today's nscaler_z and the current env%tempk
+    ! respiration from today's vertical-scaling factors and the current env%tempk
 
     ! ARGUMENTS:
     class(cohort_phys_type), intent(inout) :: this    ! cohort physiology object
@@ -156,8 +159,9 @@ contains
     ! per layer and saved to cap_z(iv)
     do iv = 1, cohort%nv
       call LeafLayerCapacity(pft, env%tempk, env%t_growth, env%t_home,         &
-        this%nscaler_z(iv), env%dayl_factor, env%btran, cohort%vcmax25top,     &
-        cohort%jmax25top, cohort%kp25top, lnc_top, this%cap_z(iv))
+        this%nscaler_z(iv), this%rdark_scaler_z(iv), env%dayl_factor,          &
+        env%btran, cohort%vcmax25top, cohort%jmax25top, cohort%kp25top,        &
+        lnc_top, this%cap_z(iv))
     end do
 
   end subroutine RefreshCapacity

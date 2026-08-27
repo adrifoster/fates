@@ -47,6 +47,7 @@ module FatesTestEnvironmentMod
   real(r8), public, parameter :: default_veg_tempk   = 25.0_r8 + t_water_freeze_k_1atm ! [K]
   real(r8), public, parameter :: default_par         = 1500.0_r8  ! [umol/m2/s]
   real(r8), public, parameter :: default_nscaler     = 1.0_r8     ! [0-1]
+  real(r8), public, parameter :: default_rdark_scaler = 1.0_r8    ! [0-1] (canopy top, no leaf area above)
   real(r8), public, parameter :: default_rootfr      = 1.0_r8     ! [0-1]
   real(r8), public, parameter :: direct_frac         = 0.85_r8    ! fraction of incident PAR that is direct beam (typical clear sky)
   real(r8), public, parameter :: diffuse_frac        = 1.0_r8 - direct_frac ! fraction of incident PAR that is diffuse

@@ -41,11 +41,15 @@ program FatesSingleCohort
   use PRTLossFluxesMod,            only : PRTPhenologyFlush
   use PRTLossFluxesMod,            only : PRTDeciduousTurnover
   use FatesUnitTestParamReaderMod, only : ReadParameters
+  use FatesUnitTestParamReaderMod, only : CheckLeafRespParams
   use FatesArgumentUtils,          only : command_line_arg
   use FatesFactoryMod,             only : InitializeGlobals, CohortFactory
   use FatesGlobals,                only : FatesGlobalsInit
   use FatesGlobals,                only : fates_log
   use FatesInterfaceTypesMod,      only : numpft, hlm_mort_cstarvation_model
+  use FatesInterfaceTypesMod,      only : hlm_maintresp_leaf_model
+  use FatesConstantsMod,           only : lmrmodel_ryan_1991
+  use FatesConstantsMod,           only : lmrmodel_atkin_etal_2017
   use PRTParametersMod,            only : prt_params
   use PRTGenericMod,               only : leaf_organ, fnrt_organ, sapw_organ, struct_organ
   use PRTGenericMod,               only : store_organ, carbon12_element
@@ -158,10 +162,16 @@ program FatesSingleCohort
   call PRTDerivedParams()
 
   ! host-model-namelist-controlled leaf biophysics switches
+  ! switch to lmrmodel_atkin_etal_2017 for Atkin et al. (2017) leaf respiration
+  hlm_maintresp_leaf_model           = lmrmodel_atkin_etal_2017
   lb_params%electron_transport_model = FvCB1980 ! Farquhar-von Caemmerer-Berry (1980)
   lb_params%stomatal_model           = medlyn_model
   lb_params%stomatal_assim_model     = net_assim_model
   lb_params%photo_tempsens_model     = photosynth_acclim_model_kumarathunge_etal_2019
+
+  ! report the Atkin et al. (2017) parameter check production runs via
+  ! FatesCheckParams (a no-op unless that model is selected above)
+  call CheckLeafRespParams()
 
   ! host-model-namelist-controlled carbon-starvation mortality model
   hlm_mort_cstarvation_model = cstarvation_model_lin

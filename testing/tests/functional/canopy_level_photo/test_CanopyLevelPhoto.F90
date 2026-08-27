@@ -35,6 +35,7 @@ program FatesCanopyLevelPhoto
   use PRTInitParamsFatesMod,       only : PRTDerivedParams
   use FatesParameterDerivedMod,    only : param_derived
   use FatesUnitTestParamReaderMod, only : ReadParameters
+  use FatesUnitTestParamReaderMod, only : CheckLeafRespParams
   use FatesArgumentUtils,          only : command_line_arg
   use FatesFactoryMod,             only : InitializeGlobals
   use FatesGlobals,                only : FatesGlobalsInit
@@ -59,7 +60,7 @@ program FatesCanopyLevelPhoto
   use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
   use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
   use FatesTestLeafPhotoMod,       only : LeafNitrogenContent
-  use FatesTestLeafPhotoMod,       only : LeafLayerNitrogenScaling
+  use FatesTestLeafPhotoMod,       only : LeafLayerVerticalScaling
   use FatesUnitTestIOMod,          only : OpenNCFile, RegisterNCDims, CloseNCFile
   use FatesUnitTestIOMod,          only : WriteVar, RegisterVarAtts, EndNCDef
   use FatesUnitTestIOMod,          only : RegisterFillValue
@@ -114,11 +115,13 @@ program FatesCanopyLevelPhoto
   real(r8), allocatable :: laisun_z_out(:,:)  ! sunlit leaf area index [m2 leaf/m2 crown footprint]
   real(r8), allocatable :: laisha_z_out(:,:)  ! shaded leaf area index [m2 leaf/m2 crown footprint]
   real(r8), allocatable :: nscaler_z_out(:,:) ! per-layer nitrogen-scaling factor [0-1]
+  real(r8), allocatable :: rdark_scaler_z_out(:,:) ! per-layer respiration-scaling factor [0-1]
   real(r8), allocatable :: anet_z_out(:,:)    ! per-layer area-weighted net photosynthesis [umolC/m2 leaf/s]
   integer,  allocatable :: nv_out(:)          ! number of occupied leaf layers at each prescribed LAI
   integer,  allocatable :: layer_index(:)     ! leaf-layer index coordinate [1..nlevleaf]
   ! per-layer working arrays, sized to the current LAI's nv
   real(r8), allocatable :: nscaler_z(:) ! per-leaf-layer nitrogen-scaling factor [0-1]
+  real(r8), allocatable :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1]
 
   integer :: n_par, n_co2, n_vpd, n_temp, n_soilfrac ! sweep array sizes
   integer :: i    ! sweep-point looping index
@@ -170,11 +173,16 @@ program FatesCanopyLevelPhoto
   call PRTDerivedParams()
 
   ! host-model-namelist-controlled leaf biophysics switches
-  hlm_maintresp_leaf_model = lmrmodel_ryan_1991
+  ! switch to lmrmodel_atkin_etal_2017 for Atkin et al. (2017) leaf respiration
+  hlm_maintresp_leaf_model = lmrmodel_atkin_etal_2017
   lb_params%electron_transport_model = FvCB1980
   lb_params%stomatal_model = medlyn_model
   lb_params%stomatal_assim_model = net_assim_model
   lb_params%photo_tempsens_model = photosynth_acclim_model_kumarathunge_etal_2019
+
+  ! report the Atkin et al. (2017) parameter check production runs via
+  ! FatesCheckParams (a no-op unless that model is selected above)
+  call CheckLeafRespParams()
 
   ! leaf N content and reference (25C, canopy-top) photosynthetic capacity for
   ! target_pft
@@ -192,7 +200,8 @@ program FatesCanopyLevelPhoto
 
   allocate(parsun_z_out(nlevleaf, n_lai), parsha_z_out(nlevleaf, n_lai))
   allocate(laisun_z_out(nlevleaf, n_lai), laisha_z_out(nlevleaf, n_lai))
-  allocate(nscaler_z_out(nlevleaf, n_lai), anet_z_out(nlevleaf, n_lai))
+  allocate(nscaler_z_out(nlevleaf, n_lai), rdark_scaler_z_out(nlevleaf, n_lai))
+  allocate(anet_z_out(nlevleaf, n_lai))
   allocate(nv_out(n_lai), layer_index(nlevleaf))
 
   ! layers above a given LAI's actual nv are never written, and keep this fill
@@ -202,6 +211,7 @@ program FatesCanopyLevelPhoto
   laisun_z_out(:,:)  = fates_unset_r8
   laisha_z_out(:,:)  = fates_unset_r8
   nscaler_z_out(:,:) = fates_unset_r8
+  rdark_scaler_z_out(:,:) = fates_unset_r8
   anet_z_out(:,:)    = fates_unset_r8
 
   do iv = 1, nlevleaf
@@ -268,16 +278,16 @@ program FatesCanopyLevelPhoto
 
     nv_out(ilai) = GetNVegLayers(lai_vals(ilai) + canopy_sai)
 
-    ! this canopy's per-layer nitrogen scaling - the vertical decay of
-    ! photosynthetic capacity with cumulative leaf area above each layer,
-    if (allocated(nscaler_z)) deallocate(nscaler_z)
-    allocate(nscaler_z(nv_out(ilai)))
-    call LeafLayerNitrogenScaling(lai_vals(ilai), canopy_sai, canopy_height,   &
-      nv_out(ilai), target_pft, vcmax25top, 0.0_r8, nscaler_z)
+    ! this canopy's per-layer vertical scaling - the decay of photosynthetic
+    ! capacity and of leaf respiration with cumulative leaf area above each layer
+    if (allocated(nscaler_z)) deallocate(nscaler_z, rdark_scaler_z)
+    allocate(nscaler_z(nv_out(ilai)), rdark_scaler_z(nv_out(ilai)))
+    call LeafLayerVerticalScaling(lai_vals(ilai), canopy_sai, canopy_height,   &
+      nv_out(ilai), target_pft, vcmax25top, 0.0_r8, nscaler_z, rdark_scaler_z)
 
     ! call for reference case: this driver's prescribed clear-sky beam fraction.
     ! This call stores the per-leaf-layer profile
-    call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s, &
+    call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z, default_par/wm2_to_umolm2s, &
       direct_frac, env%tempk, env%tempk, env%tempk, default_veg_esat,        &
       default_can_vpress, env%can_co2_ppress, env%btran, vcmax25top,         &
       canopy_anet(ilai), canopy_agross(ilai), store_profile=.true., ilai_store=ilai)
@@ -286,7 +296,7 @@ program FatesCanopyLevelPhoto
     ! PAR sweep
     ! ---------------------------------------------------------------------
     do i = 1, n_par
-      call CanopyNetAssim(nv_out(ilai), nscaler_z, par_vals(i)/wm2_to_umolm2s, &
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z, par_vals(i)/wm2_to_umolm2s, &
         direct_frac, env%tempk, env%tempk, env%tempk,  default_veg_esat,       &
         default_can_vpress, env%can_co2_ppress, env%btran, vcmax25top,         &
         canopy_anet_bypar(i,ilai), canopy_agross_bypar(i,ilai))
@@ -296,7 +306,7 @@ program FatesCanopyLevelPhoto
     ! CO2 sweep
     ! ---------------------------------------------------------------------
     do i = 1, n_co2
-      call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s, &
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z, default_par/wm2_to_umolm2s, &
         direct_frac, env%tempk, env%tempk, env%tempk, default_veg_esat,        &
         default_can_vpress, co2_vals(i), env%btran, vcmax25top,                &
         canopy_anet_byco2(i,ilai), canopy_agross_byco2(i,ilai))
@@ -308,7 +318,7 @@ program FatesCanopyLevelPhoto
     ! ---------------------------------------------------------------------
     do i = 1, n_vpd
       can_vpress_byvpd(i) = CanopyVaporPressure(default_veg_esat, vpd=vpd_vals(i))
-      call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s, &
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z, default_par/wm2_to_umolm2s, &
         direct_frac, env%tempk, env%tempk, env%tempk, default_veg_esat,        &
         can_vpress_byvpd(i), env%can_co2_ppress, env%btran, vcmax25top,        &
         canopy_anet_byvpd(i,ilai), canopy_agross_byvpd(i,ilai))
@@ -322,7 +332,7 @@ program FatesCanopyLevelPhoto
     do i = 1, n_temp
       call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
       can_vpress_bytemp(i) = CanopyVaporPressure(veg_esat_bytemp(i))
-      call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s, &
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z, default_par/wm2_to_umolm2s, &
         direct_frac, temp_vals(i), env%tempk, env%tempk, veg_esat_bytemp(i),   &
         can_vpress_bytemp(i), env%can_co2_ppress, env%btran, vcmax25top,       &
         canopy_anet_bytemp(i,ilai), canopy_agross_bytemp(i,ilai))
@@ -335,7 +345,7 @@ program FatesCanopyLevelPhoto
     do i = 1, n_soilfrac
       smp = SoilMatricPotential(soilfrac_vals(i), smpsc)
       btran_bysoilfrac(i) = BtranFromSMP(smp, smpsc, smpso)
-      call CanopyNetAssim(nv_out(ilai), nscaler_z, default_par/wm2_to_umolm2s,   &
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z, default_par/wm2_to_umolm2s,   &
         direct_frac, env%tempk, env%tempk, env%tempk, default_veg_esat,          &
         default_can_vpress, env%can_co2_ppress, btran_bysoilfrac(i), vcmax25top, &                                   
         canopy_anet_bysoilfrac(i,ilai), canopy_agross_bysoilfrac(i,ilai))
@@ -356,9 +366,9 @@ contains
 
   ! ==========================================================================
 
-  subroutine CanopyNetAssim(nv, nscaler_z, par_toc, beam_frac, veg_tempk,      &
-    t_growth, t_home, veg_esat, can_vpress, can_co2_ppress, btran, vcmax25top, &
-    canopy_anet_out, canopy_agross_out, store_profile, ilai_store)
+  subroutine CanopyNetAssim(nv, nscaler_z, rdark_scaler_z, par_toc, beam_frac, &
+    veg_tempk, t_growth, t_home, veg_esat, can_vpress, can_co2_ppress, btran,  &
+    vcmax25top, canopy_anet_out, canopy_agross_out, store_profile, ilai_store)
     !
     ! DESCRIPTION:
     ! Integrate leaf photosynthesis through a canopy
@@ -366,6 +376,7 @@ contains
     ! ARGUMENTS:
     integer,  intent(in)           :: nv                ! number of occupied leaf layers
     real(r8), intent(in)           :: nscaler_z(:)      ! per-leaf-layer nitrogen-scaling factor [0-1]
+    real(r8), intent(in)           :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1]
     real(r8), intent(in)           :: par_toc           ! incident PAR at the top of the canopy [W/m2]
     real(r8), intent(in)           :: beam_frac         ! fraction of par_toc arriving as direct beam [0-1]
     real(r8), intent(in)           :: veg_tempk         ! instantaneous leaf temperature [K]
@@ -411,9 +422,9 @@ contains
     do iv = 1, nv
 
       ! this layer's capacity
-      call LeafLayerCapacity(target_pft, veg_tempk, t_growth, t_home, &
-        nscaler_z(iv), env%dayl_factor, btran, vcmax25top, jmax25top, &
-        kp25top, lnc_top, cap)
+      call LeafLayerCapacity(target_pft, veg_tempk, t_growth, t_home,           &
+        nscaler_z(iv), rdark_scaler_z(iv), env%dayl_factor, btran, vcmax25top,  &
+        jmax25top, kp25top, lnc_top, cap)
 
       ! sunlit and shaded leaves in this layer, area-weighted into one rate
       call LeafLayerSunShade(target_pft, cap, light_env%parsun_z(iv),          &
@@ -433,6 +444,7 @@ contains
         laisun_z_out(iv, ilai_store)  = light_env%laisun_z(iv)
         laisha_z_out(iv, ilai_store)  = light_env%laisha_z(iv)
         nscaler_z_out(iv, ilai_store) = nscaler_z(iv)
+        rdark_scaler_z_out(iv, ilai_store) = rdark_scaler_z(iv)
         anet_z_out(iv, ilai_store)    = anet_layer
       end if
 
@@ -457,7 +469,7 @@ contains
     integer           :: dimIDs(7)     ! dimension IDs
     integer           :: laiID, layerID, nvID, canopyanetID, canopyagrossID
     integer           :: parsunID, parshaID, laisunID, laishaID
-    integer           :: nscalerID, anetzID
+    integer           :: nscalerID, rdarkscalerID, anetzID
     integer           :: parID, co2ID, vpdID, tempID, soilfracID
     integer           :: vegesatbytempID, canvpressbytempID
     integer           :: canvpressbyvpdID, btranbysoilfracID
@@ -508,6 +520,10 @@ contains
     call RegisterVarAtts(ncid, 'nscaler_z', (/dimIDs(1), dimIDs(2)/), type_double, '-', &
       'nitrogen-scaling factor per layer', nscalerID, coordinates='layer lai')
     call RegisterFillValue(ncid, nscalerID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'rdark_scaler_z', (/dimIDs(1), dimIDs(2)/), type_double, &
+      '-', 'leaf respiration scaling factor per layer, Atkin et al. (2017) only',       &
+      rdarkscalerID, coordinates='layer lai')
+    call RegisterFillValue(ncid, rdarkscalerID, fates_unset_r8)
     call RegisterVarAtts(ncid, 'anet_z', (/dimIDs(1), dimIDs(2)/), type_double,         &
       'umolC m-2 s-1',                                                                  &
       'area-weighted net photosynthesis per unit leaf area, per layer', anetzID,        &
@@ -588,6 +604,7 @@ contains
     call WriteVar(ncid, laisunID, laisun_z_out(:,:))
     call WriteVar(ncid, laishaID, laisha_z_out(:,:))
     call WriteVar(ncid, nscalerID, nscaler_z_out(:,:))
+    call WriteVar(ncid, rdarkscalerID, rdark_scaler_z_out(:,:))
     call WriteVar(ncid, anetzID, anet_z_out(:,:))
 
     call WriteVar(ncid, parID, par_vals(:))

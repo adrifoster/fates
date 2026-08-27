@@ -15,7 +15,7 @@ module EDPftvarcon
   use PRTParametersMod, only : prt_params
   use LeafBiophysicsMod, only : lb_params
   use LeafBiophysicsMod, only : btran_on_gs_gs02,btran_on_ag_vcmax_jmax
-  use LeafBiophysicsMod, only : lmr_r_1, lmr_r_2
+  use LeafBiophysicsMod, only : NegativeRdarkTempC
   use LeafBiophysicsMod, only : c3_path_index, c4_path_index
   use FatesGlobals,   only : fates_log
   use FatesGlobals,   only : endrun => fates_endrun
@@ -984,7 +984,6 @@ contains
 
      real(r8) :: sumarea    ! area of PFTs in nocomp mode.
      real(r8) :: neg_lmr_temp ! temperature at which lmr would got negative 
-     real(r8) :: r_0 ! base respiartion rate, PFT-dependent
      real(r8) :: lnc_top ! leaf nitrogen content at top of canopy
      
      
@@ -1400,16 +1399,11 @@ contains
      ! given their parameters
      !------------------------------------------------------------------------------------
      do ipft = 1,npft
-        
-        r_0 = lb_params%maintresp_leaf_atkin2017_baserate(ipft)
 
-        lnc_top = prt_params%nitr_stoich_p1(ipft, prt_params%organ_param_id(leaf_organ))
-        
-        ! From LeafLayerMaintenanceRespiration_Atkin_etal_2017
-        ! r_t_ref = nscaler * (r_0 + r_1 * lnc_top + r_2 * max(0._r8, (tgrowth - tfrz) ))
+        lnc_top = prt_params%nitr_stoich_p1(ipft, prt_params%organ_param_id(leaf_organ)) / &
+             prt_params%slatop(ipft)
 
-        ! find temperature at which whole term is negative
-        neg_lmr_temp = ( -1._r8 * (  r_0  + lmr_r_1 * lnc_top ) ) / lmr_r_2
+        neg_lmr_temp = NegativeRdarkTempC(ipft, lnc_top)
 
         write(fates_log(),*)  'PFT  ',  ipft
         write(fates_log(),*)  'will have  negative Rdark at ', neg_lmr_temp, 'degrees C' 
