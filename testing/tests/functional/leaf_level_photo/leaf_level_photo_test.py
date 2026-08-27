@@ -20,7 +20,7 @@ class LeafLevelPhoto(FunctionalTest):
     # six independent sweeps test_LeafLevelPhoto.F90 writes out - variable
     # names follow this file's own <metric>_by<dim> convention
     _SWEEPS = [
-        ("par", "Incident PAR ($\\mu$mol m$^{-2}$ s$^{-1}$)", "PAR"),
+        ("par", "Absorbed PAR ($\\mu$mol m$^{-2}$ s$^{-1}$)", "PAR"),
         ("co2", "CO$_2$ partial pressure (Pa)", "CO$_2$"),
         ("vpd", "Vapor pressure deficit (kPa)", "VPD"),
         ("temp", "Leaf temperature ($^{\\circ}$C)", "leaf temperature"),

@@ -2628,7 +2628,7 @@ contains
      ! default is to use the same exponent as the dbh to bleaf exponent so that per-plant 
      ! canopy depth remains invariant during growth, but allowed to vary via the 
      ! allom_blca_expnt_diff term (which has default value of zero)
-     crown_area_to_dbh_exponent = d2bl_p2 + d2bl_ediff
+     crown_area_to_dbh_exponent = d2bl_ediff
      
      ! ----------------------------------------------------------------------------------
      ! The function c_area is called during the process of canopy position demotion

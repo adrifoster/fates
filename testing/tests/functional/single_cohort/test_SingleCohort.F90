@@ -101,7 +101,7 @@ program FatesSingleCohort
   integer,                     parameter :: leaf_lcp_layer = 1              ! canopy layer swept for the leaf-level (LCPleaf) diagnostic
   integer,                     parameter :: days_per_year = 365             ! days per simulated year
   integer,                     parameter :: n_substeps_per_day = 48         ! sub-daily steps per day (half-hourly), must be even
-  integer,                     parameter :: nyears = 2                     ! number of years to simulate
+  integer,                     parameter :: nyears = 30                     ! number of years to simulate
   
   ! timing calculations
   real(r8), parameter :: step_size = 86400.0_r8/n_substeps_per_day ! model time step [s]

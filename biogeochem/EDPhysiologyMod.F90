@@ -794,7 +794,7 @@ contains
          ! (Convert from SLA in m2g-1 to m2kg-1)
          cohort%leaf_cost = 1.0_r8/(sla_levleaf*pft_leaf_lifespan*g_per_kg)
 
-         if (int(prt_params%allom_fmode(ipft)) == 1) then
+         if (int(prt_params%allom_fmode(cohort%pft)) == 1) then
             ! if using trimmed leaf for fine root biomass allometry, add the cost of the root increment
             ! to the leaf increment; otherwise do not.
             cohort%leaf_cost = cohort%leaf_cost + &
