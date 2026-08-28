@@ -149,7 +149,7 @@ program FatesCanopyLevelPhoto
   ! illumination geometry
   real(r8), parameter :: diagnostic_coszen = 1.0_r8 ! cosine of solar zenith angle (sun directly overhead)
 
-    ! read in parameter file name from command line
+  ! read in parameter file name from command line
   param_file = command_line_arg(1)
   
   ! output file name, depends on either arg2 or is just default
@@ -174,7 +174,7 @@ program FatesCanopyLevelPhoto
 
   ! host-model-namelist-controlled leaf biophysics switches
   ! switch to lmrmodel_atkin_etal_2017 for Atkin et al. (2017) leaf respiration
-  hlm_maintresp_leaf_model = lmrmodel_atkin_etal_2017
+  hlm_maintresp_leaf_model = lmrmodel_ryan_1991
   lb_params%electron_transport_model = FvCB1980
   lb_params%stomatal_model = medlyn_model
   lb_params%stomatal_assim_model = net_assim_model

@@ -89,7 +89,7 @@ contains
 
   ! ==========================================================================
 
-  subroutine DailySetup(this, cohort, pft, lai_above, frac_store)
+  subroutine DailySetup(this, cohort, pft, lai_above, frac_store, vert_scaler_min)
     !
     ! DESCRIPTION:
     ! Calculate a daily setup: storage-based maintenance-respiration factor,
@@ -104,6 +104,7 @@ contains
     integer,                 intent(in)    :: pft        ! plant functional type index
     real(r8),                intent(in)    :: lai_above  ! lai above the cohort [m2/m2]
     real(r8),                intent(out)   :: frac_store ! ratio of storage carbon to target_leaf_c [-]
+    real(r8),   intent(in), optional :: vert_scaler_min  ! floor on the vertical-scaling factors, unbounded if absent [0-1]
 
     ! LOCALS:
     real(r8) :: target_leaf_c  ! reference leaf biomass when fully flushed [kgC]
@@ -133,7 +134,7 @@ contains
 
     call LeafLayerVerticalScaling(cohort%treelai, cohort%treesai,              &
       cohort%height, cohort%nv, pft, cohort%vcmax25top, lai_above,             &
-      this%nscaler_z, this%rdark_scaler_z)
+      this%nscaler_z, this%rdark_scaler_z, vert_scaler_min)
 
   end subroutine DailySetup
 

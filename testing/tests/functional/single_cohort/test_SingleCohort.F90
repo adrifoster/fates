@@ -103,6 +103,7 @@ program FatesSingleCohort
   real(r8),                    parameter :: ppfd_diagnostic_min = 0.01_r8   ! lowest swept PPFD [umol/m2/s]
   real(r8),                    parameter :: ppfd_diagnostic_max = 2500.0_r8 ! highest swept PPFD [umol/m2/s] (~full sun)
   integer,                     parameter :: leaf_lcp_layer = 1              ! canopy layer swept for the leaf-level (LCPleaf) diagnostic
+  real(r8),                    parameter :: vert_scaler_min = 0.2_r8        ! floor on the leaf vertical-scaling factors [0-1]
   integer,                     parameter :: days_per_year = 365             ! days per simulated year
   integer,                     parameter :: n_substeps_per_day = 48         ! sub-daily steps per day (half-hourly), must be even
   integer,                     parameter :: nyears = 30                     ! number of years to simulate
@@ -120,7 +121,7 @@ program FatesSingleCohort
   integer, parameter :: term_live_pools  = 2  ! sapwood+leaf+fineroot terminally depleted
   integer, parameter :: term_neg_biomass = 3  ! total cohort biomass negative
   integer, parameter :: term_num_dens    = 4  ! number density below numerical safety
-
+  
   ! read in parameter file name from command line
   param_file = command_line_arg(1)
 
@@ -163,7 +164,7 @@ program FatesSingleCohort
 
   ! host-model-namelist-controlled leaf biophysics switches
   ! switch to lmrmodel_atkin_etal_2017 for Atkin et al. (2017) leaf respiration
-  hlm_maintresp_leaf_model           = lmrmodel_atkin_etal_2017
+  hlm_maintresp_leaf_model = lmrmodel_ryan_1991
   lb_params%electron_transport_model = FvCB1980 ! Farquhar-von Caemmerer-Berry (1980)
   lb_params%stomatal_model           = medlyn_model
   lb_params%stomatal_assim_model     = net_assim_model
@@ -282,8 +283,7 @@ contains
     
     ! CONSTANTS:
     real(r8) :: k = 0.5_r8 ! extinction coefficient for deriving canopy_layer_tlai
-    real(r8) :: max_lai = 4.0_r8
-    
+
     init_dbh = EDPftvarcon_inst%initdbh(pft)
 
     ! set counters
@@ -302,7 +302,6 @@ contains
     else
       cohort_can_layer = 2
       lai_above = -1.0_r8 * log(light_frac_val)/k
-      if (lai_above > max_lai) lai_above = max_lai
       if (lai_above < 0.0_r8) lai_above = 0.0_r8
     end if 
 
@@ -357,7 +356,7 @@ contains
 
         ! once-per-day setup: maintenance respiration factor, sapwood/fine-root N, and the per-layer
         ! nitrogen-scaling factor 
-        call phys%DailySetup(cohort, pft, lai_above, frac_store)
+        call phys%DailySetup(cohort, pft, lai_above, frac_store, vert_scaler_min)
 
         ! today's storage-based maintenance-respiration factor
         ! recalculated for output

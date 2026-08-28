@@ -92,16 +92,11 @@ contains
     real(r8) :: neg_lmr_tempC ! growth temperature at which Rdark is capped at zero [degrees C]
 
     if (hlm_maintresp_leaf_model /= lmrmodel_atkin_etal_2017) return
-
-    write(*,*) 'Atkin et al. (2017) leaf respiration: growth temperature at which'
-    write(*,*) 'Rdark is capped at zero, per PFT (degrees C)'
     do ipft = 1, numpft
       lnc_top = LeafNitrogenContent(ipft)
       neg_lmr_tempC = NegativeRdarkTempC(ipft, lnc_top)
       if (neg_lmr_tempC < reference_tgrowth_C) then
         write(*,*) '  pft ', ipft, neg_lmr_tempC, ' WARNING: below reference growth temperature'
-      else
-        write(*,*) '  pft ', ipft, neg_lmr_tempC
       end if
     end do
 

@@ -206,7 +206,7 @@ contains
   ! ==========================================================================
   
   subroutine LeafLayerVerticalScaling(treelai, treesai, height, nv, pft,        &
-    vcmax25top, lai_above_in, nscaler_z, rdark_scaler_z)
+    vcmax25top, lai_above_in, nscaler_z, rdark_scaler_z, vert_scaler_min)
     !
     ! DESCRIPTION:
     ! Per-leaf-layer vertical-scaling factors, the decay of photosynthetic
@@ -222,6 +222,12 @@ contains
     ! Depends only on canopy structure (treelai/treesai/height/nv) and the
     ! reference canopy-top capacity
     !
+    ! The prescribed exponentials have no lower bound, so at large cumulative
+    ! LAI they extrapolate below any viable leaf nitrogen content.
+    ! vert_scaler_min, when supplied, floors both profiles at a minimum viable
+    ! fraction of canopy-top capacity. The two decay coefficients differ, so the
+    ! floor binds at different cumulative LAI in each
+    !
     ! Snow depth is fixed at zero
     !
 
@@ -235,6 +241,7 @@ contains
     real(r8), intent(in)  :: vcmax25top        ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
     real(r8), intent(out) :: nscaler_z(:)      ! per-leaf-layer nitrogen-scaling factor [0-1], first nv entries filled
     real(r8), intent(out) :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1], first nv entries filled
+    real(r8), intent(in), optional :: vert_scaler_min ! floor on both scaling factors, unbounded if absent [0-1]
 
     ! LOCALS:
     integer  :: iv                     ! leaf-layer looping index
@@ -263,6 +270,10 @@ contains
       lai_above = lai_above + elai_layer
       nscaler_z(iv) = exp(-kn*cumulative_lai)
       rdark_scaler_z(iv) = exp(-kn_rdark*cumulative_lai)
+      if (present(vert_scaler_min)) then
+        nscaler_z(iv) = max(nscaler_z(iv), vert_scaler_min)
+        rdark_scaler_z(iv) = max(rdark_scaler_z(iv), vert_scaler_min)
+      end if
     end do
 
   end subroutine LeafLayerVerticalScaling
