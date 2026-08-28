@@ -722,7 +722,7 @@ contains
       ! (elongation factor = 1)
       call bleaf(cohort%dbh, cohort%pft, cohort%crowndamage, cohort%canopy_trim, 1.0_r8, tar_bl)
 
-      if (int(prt_params%allom_fmode(ipft)) == 1) then
+      if (int(prt_params%allom_fmode(cohort%pft)) == 1) then
          ! only query fine root biomass if using a fine root allometric model that takes 
          ! leaf trim into account
          call bfineroot(cohort%dbh, cohort%pft, cohort%canopy_trim, cohort%l2fr, 1.0_r8, tar_bfr)
