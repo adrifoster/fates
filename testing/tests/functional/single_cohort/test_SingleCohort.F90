@@ -84,19 +84,21 @@ program FatesSingleCohort
   integer                       :: n_bisection_calls_total !
   integer                       :: max_solve_iter_total    ! whole run
   logical                       :: reduced_output          ! optional 2nd command-line arg
+  logical                       :: full_light_only         ! optional 5th command-line arg
+  integer                       :: n_light_levels          ! number of incident light levels to run
   character(len=:), allocatable :: param_file              ! input parameter file
   character(len=:), allocatable :: site_namelist_file      ! optional 4th command-line arg
   character(len=:), allocatable :: out_file                ! output file
 
   ! CONSTANTS:
-  integer,                     parameter :: pft = 1                         ! plant functional type to simulate
+  integer,                     parameter :: pft = 2                         ! plant functional type to simulate
   real(r8),                    parameter :: patch_area = 1.0e4_r8           ! reference ground area the cohort occupies [m2]
   real(r8),                    parameter :: cohort_n = 1.0_r8               ! individuals in the cohort [indiv]
   real(r8),                    parameter :: coh_age = 0.0_r8                ! cohort age
   real(r8),                    parameter :: site_spread = 1.0_r8            ! site spread index
   integer,                     parameter :: leaf_on_doy = 60                ! prescribed leaf on day of year (for cold deciduous PFTs)
   integer,                     parameter :: leaf_off_doy = 305.             ! prescribed leaf off day of year (for cold deciduous PFTs)
-  integer,                     parameter :: n_light_levels = 25             ! number of incident light levels to sweep
+  integer,                     parameter :: n_light_levels_sweep = 25       ! number of incident light levels to sweep
   real(r8),                    parameter :: light_frac_min = 0.005_r8       ! lowest incident light fraction swept [fraction of full sun]
   real(r8),                    parameter :: light_frac_max = 1.0_r8         ! highest incident light fraction swept [fraction of full sun]
   integer,                     parameter :: n_ppfd_diagnostic = 40          ! number of PPFD values to sweep
@@ -147,6 +149,12 @@ program FatesSingleCohort
     call ReadSiteNamelist(site_namelist_file)
   end if
 
+  ! optional 5th command-line argument: run full light only
+  full_light_only = .false.
+  if (command_argument_count() >= 5) then
+    full_light_only = (trim(command_line_arg(5)) == 'full_light')
+  end if
+
   ! read in parameter file
   call ReadParameters(param_file)
 
@@ -186,11 +194,18 @@ program FatesSingleCohort
   par_absorptance = 1.0_r8 - EDPftvarcon_inst%rhol(pft,ipar) - EDPftvarcon_inst%taul(pft,ipar)
 
   ! build the log-spaced incident light fractions to sweep
-  allocate(light_frac(n_light_levels))
-  do ilight = 1, n_light_levels
-    light_frac(ilight) = light_frac_min * (light_frac_max/light_frac_min) **      &
-      (real(ilight - 1, r8)/real(n_light_levels - 1, r8))
-  end do
+  if (full_light_only) then
+    n_light_levels = 1
+    allocate(light_frac(n_light_levels))
+    light_frac(1) = light_frac_max
+  else
+    n_light_levels = n_light_levels_sweep
+    allocate(light_frac(n_light_levels))
+    do ilight = 1, n_light_levels
+      light_frac(ilight) = light_frac_min * (light_frac_max/light_frac_min) **    &
+        (real(ilight - 1, r8)/real(n_light_levels - 1, r8))
+    end do
+  end if
 
   ! build the log-spaced diagnostic PPFD sweep
   allocate(diagnostic_ppfd(n_ppfd_diagnostic))

@@ -142,7 +142,7 @@
       "dims": ["fates_pft"],
       "long_name": "difference between allometric DBH bleaf and DBH crown area exponents",
       "units": "unitless",
-      "data": [1.4819679, -0.25, -0.32, -0.22, -0.12, -0.35, 0.0, 0.0, 0.0, 0.0, 0.0, -0.487, -0.487, -0.259, -0.487]
+      "data": [1.4819679, 1.273437, -0.32, -0.22, -0.12,  1.049894, 0.0, 0.0, 0.0, 0.0, 0.0, -0.487, -0.487, -0.259, -0.487]
     },
     "fates_allom_cmode":{
       "dtype": "integer",
@@ -541,7 +541,7 @@
       "dims": ["fates_pft"],
       "long_name": "Unassociated pft dimensioned free parameter that developers can use for testing arbitrary new hypotheses",
       "units": "unknown",
-      "data": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+      "data": [3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3, 3.0e-3]
     },
     "fates_fire_alpha_SH":{
       "dtype": "float",
