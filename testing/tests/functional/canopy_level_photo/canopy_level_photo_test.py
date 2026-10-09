@@ -105,9 +105,6 @@ class CanopyLevelPhoto(FunctionalTest):
             if varname.startswith("canopy_anet"):
                 axis.axhline(0.0, lw=0.6, color="0.4", linestyle=":")
             cls._style_axis(axis)
-            if dim == "soilfrac":
-                axis.set_ylim(0.0, 1.5 * cls._DEFAULT_CO2_PPM)
-            cls._style_axis(axis)
             axis.set_xlabel(xlabel, fontsize=10)
             axis.set_ylabel(ylabel, fontsize=10)
             axis.legend(frameon=False, fontsize=9)

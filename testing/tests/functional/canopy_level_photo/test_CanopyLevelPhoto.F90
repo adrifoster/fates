@@ -37,6 +37,7 @@ program FatesCanopyLevelPhoto
   use FatesParameterDerivedMod,    only : param_derived
   use FatesFactoryMod,             only : InitializeGlobals
   use LeafBiophysicsMod,           only : lb_params
+  use LeafBiophysicsMod,           only : QSat
   use LeafBiophysicsMod,           only : GetCanopyGasParameters
   use FatesInterfaceTypesMod,      only : hlm_maintresp_leaf_model
   use FatesConstantsMod,           only : lmrmodel_ryan_1991, lmrmodel_atkin_etal_2017
@@ -47,6 +48,8 @@ program FatesCanopyLevelPhoto
   use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
   use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
   use FatesTestEnvironmentMod,     only : environment_type
+  use FatesTestEnvironmentMod,     only : BtranFromSMP, SoilMatricPotential
+  use FatesTestEnvironmentMod,     only : CanopyVaporPressure
   use FatesTestLightEnvMod,        only : light_env_type
   use FatesUnitTestIOMod,          only : OpenNCFile, RegisterNCDims, CloseNCFile
   use FatesUnitTestIOMod,          only : WriteVar, RegisterVarAtts, EndNCDef
@@ -81,6 +84,8 @@ program FatesCanopyLevelPhoto
   real(r8),         allocatable :: can_vpress_byvpd(:)     ! canopy air vapor pressure at each swept VPD (= veg_esat - vpd), fixed default leaf temperature [Pa]
   real(r8),         allocatable :: btran_bysoilfrac(:)     ! btran derived from each swept soil water content fraction [0-1]
   real(r8)                      :: lnc_top                 ! leaf N content at the canopy top [gN/m2 leaf]
+  real(r8)                      :: qs_dummy                ! saturation specific humidity output from QSat (unused here)
+  real(r8)                      :: smp                     ! soil matric potential at a swept soil water content fraction [mm]
   real(r8)                      :: vcmax25top              ! top-of-canopy carboxylation rate at 25degC [umol/m2/s]
   real(r8)                      :: jmax25top               ! top-of-canopy electron transport rate at 25degC [umol/m2/s]
   real(r8)                      :: kp25top                 ! top-of-canopy initial slope of C4 CO2 response at 25degC [umol/m2/s]
@@ -269,6 +274,64 @@ program FatesCanopyLevelPhoto
         env%can_co2_ppress, env%can_o2_ppress, env%btran, env%gb,      &
         env%dayl_factor, vcmax25top, canopy_anet_bypar(i,ilai),        &
         canopy_agross_bypar(i,ilai))
+    end do
+    
+    ! ---------------------------------------------------------------------
+    ! CO2 sweep
+    ! ---------------------------------------------------------------------
+    do i = 1, n_co2
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z,     &
+        env%par/wm2_to_umolm2s, direct_frac, env%tempk, env%tempk,     &
+        env%tempk, env%veg_esat, env%can_press, env%can_vpress,        &
+        co2_vals(i), env%can_o2_ppress, env%btran, env%gb,             &
+        env%dayl_factor, vcmax25top, canopy_anet_byco2(i,ilai),        &
+        canopy_agross_byco2(i,ilai))
+    end do
+    
+    ! ---------------------------------------------------------------------
+    ! VPD sweep - leaf temperature fixed at the default, so veg_esat is
+    ! constant and can_vpress is derived directly from the swept VPD
+    ! ---------------------------------------------------------------------
+    do i = 1, n_vpd
+      can_vpress_byvpd(i) = CanopyVaporPressure(env%veg_esat, vpd=vpd_vals(i))
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z,     &
+        env%par/wm2_to_umolm2s, direct_frac, env%tempk, env%tempk,     &
+        env%tempk, env%veg_esat, env%can_press, can_vpress_byvpd(i),   &
+        env%can_co2_ppress, env%can_o2_ppress, env%btran, env%gb,      &
+        env%dayl_factor, vcmax25top, canopy_anet_byvpd(i,ilai),        &
+        canopy_agross_byvpd(i,ilai))
+    end do
+    
+    ! ---------------------------------------------------------------------
+    ! leaf temperature sweep - t_growth/t_home held at the default leaf
+    ! temperature throughout; VPD held fixed at the default as
+    ! leaf temperature varies
+    ! ---------------------------------------------------------------------
+    do i = 1, n_temp
+      call QSat(temp_vals(i), env%can_press, qs_dummy, veg_esat_bytemp(i))
+      can_vpress_bytemp(i) = CanopyVaporPressure(veg_esat_bytemp(i))
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z,          &
+        env%par/wm2_to_umolm2s, direct_frac, temp_vals(i), env%tempk,       &
+        env%tempk, veg_esat_bytemp(i), env%can_press, can_vpress_bytemp(i), &
+        env%can_co2_ppress, env%can_o2_ppress, env%btran, env%gb,           &
+        env%dayl_factor, vcmax25top, canopy_anet_bytemp(i,ilai),            &
+        canopy_agross_bytemp(i,ilai))
+    end do 
+    
+    ! ---------------------------------------------------------------------
+    ! soil water content sweep - btran derived from the real smpsc/smpso
+    ! ramp at each swept fraction 
+    ! ---------------------------------------------------------------------
+    do i = 1, n_soilfrac
+      smp = SoilMatricPotential(soilfrac_vals(i), smpsc)
+      btran_bysoilfrac(i) = BtranFromSMP(smp, smpsc, smpso)
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z,    &
+        env%par/wm2_to_umolm2s, direct_frac, env%tempk, env%tempk,    &
+        env%tempk, env%veg_esat, env%can_press, env%can_press,        &
+        env%can_co2_ppress, env%can_o2_ppress, btran_bysoilfrac(i),   &
+        env%gb, env%dayl_factor, vcmax25top,                          &
+        canopy_anet_bysoilfrac(i,ilai), canopy_agross_bysoilfrac(i,ilai))
+    
     end do
     
     ! free the light environment
