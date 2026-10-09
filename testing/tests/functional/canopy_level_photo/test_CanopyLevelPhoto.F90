@@ -63,6 +63,7 @@ program FatesCanopyLevelPhoto
   type(light_env_type)          :: light_env               ! prescribed light environment for the current LAI
   character(len=:), allocatable :: param_file              ! input parameter file
   character(len=:), allocatable :: out_file                ! output file name
+  character(len=:), allocatable :: pft_arg                 ! command-line pft argument
   real(r8),         allocatable :: parsun_z_out(:,:)       ! absorbed PAR, sunlit [W/m2 crown footprint]
   real(r8),         allocatable :: parsha_z_out(:,:)       ! absorbed PAR, shaded [W/m2 crown footprint]
   real(r8),         allocatable :: laisun_z_out(:,:)       ! sunlit leaf area index [m2 leaf/m2 crown footprint]
@@ -91,6 +92,7 @@ program FatesCanopyLevelPhoto
   real(r8)                      :: kp25top                 ! top-of-canopy initial slope of C4 CO2 response at 25degC [umol/m2/s]
   real(r8)                      :: smpsc                   ! soil matric potential at full stomatal closure [mm, negative]
   real(r8)                      :: smpso                   ! soil matric potential at full stomatal opening [mm, negative]
+  integer                       :: target_pft              ! pft to simulate
   integer                       :: n_par                   ! PAR sweep array size 
   integer                       :: n_co2                   ! CO2 sweep array size 
   integer                       :: n_vpd                   ! VPD sweep array size 
@@ -117,7 +119,7 @@ program FatesCanopyLevelPhoto
   real(r8), parameter :: direct_frac = 0.85_r8               ! fraction of incident PAR that is direct beam (typical clear sky)
   real(r8), parameter :: diffuse_frac = 1.0_r8 - direct_frac ! fraction of incident PAR that is diffuse
   integer,  parameter :: n_lai = 3                           ! number of LAI canopies to test
-  integer,  parameter :: target_pft = 1                      ! PFT index to evaluate (1-based)
+  integer,  parameter :: default_pft = 1                     ! default PFT index to evaluate (1-based)
 
   ! prescribed in-crown leaf area index [m2 leaf/m2 crown footprint]
   real(r8), parameter :: lai_vals(n_lai) = [1.0_r8, 3.0_r8, 7.0_r8] 
@@ -141,6 +143,14 @@ program FatesCanopyLevelPhoto
     out_file = trim(command_line_arg(2))
   else
     out_file = 'canopy_level_photo_out.nc'
+  end if
+  
+  ! pft, depends on either arg3 or is just default
+  if (command_argument_count() >= 3) then 
+    pft_arg = command_line_arg(3)
+    read(pft_arg,*) target_pft
+  else 
+    target_pft = default_pft
   end if
   
   ! read in parameter file
