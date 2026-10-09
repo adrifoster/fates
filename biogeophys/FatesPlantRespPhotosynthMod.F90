@@ -72,7 +72,7 @@ module FATESPlantRespPhotosynthMod
   use LeafBiophysicsMod, only : LowstorageMainRespReduction
   use LeafBiophysicsMod, only : rsmax0
   use LeafBiophysicsMod, only : DecayCoeffVcmax
-  use LeafBiophysicsMod, only : VeloToMolarCF
+  use LeafBiophysicsMod, only : VeloToMolarCF, ConvertPar
   use FatesRadiationMemMod, only : idirect
   
   ! CIME Globals
@@ -1407,29 +1407,4 @@ contains
   
   ! =====================================================================================
   
-
-
-  real(r8) function ConvertPar(leaf_area, par_wm2) result(par_umolm2s)
-    !
-    ! DESCRIPTION:
-    ! Convert par from W/m2 to umol photons/m2leaf/s
-    !
-
-    ! ARGUMENTS:
-    real(r8), intent(in) :: leaf_area ! leaf area index [m2 leaf / m2 ground]
-    real(r8), intent(in) :: par_wm2   ! absorbed PAR [W/m2 ground]
-    
-    ! minimum Leaf area to solve, too little has shown instability
-    real(r8), parameter :: min_la_to_solve = 0.0000000001_r8
-
-    if (par_wm2 > nearzero .and. leaf_area > min_la_to_solve) then
-       par_umolm2s = par_wm2/leaf_area*wm2_to_umolm2s
-    else                 
-       ! The radiative transfer schemes are imperfect
-       ! they can sometimes generate negative values here if par or leaf area is 0.0
-       par_umolm2s = 0.0_r8
-    end if
-     
-  end function ConvertPar
-
 end module FATESPlantRespPhotosynthMod

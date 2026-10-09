@@ -48,6 +48,10 @@ program FatesCanopyLevelPhoto
   use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
   use FatesTestEnvironmentMod,     only : environment_type
   use FatesTestLightEnvMod,        only : light_env_type
+  use FatesUnitTestIOMod,          only : OpenNCFile, RegisterNCDims, CloseNCFile
+  use FatesUnitTestIOMod,          only : WriteVar, RegisterVarAtts, EndNCDef
+  use FatesUnitTestIOMod,          only : RegisterFillValue
+  use FatesUnitTestIOMod,          only : type_double, type_int
 
   implicit none
 
@@ -366,10 +370,189 @@ program FatesCanopyLevelPhoto
     end do
 
   end subroutine CanopyNetAssim
+  
+  ! ==========================================================================
+
+  subroutine WriteOutput()
+    !
+    ! DESCRIPTION:
+    ! Writes the prescribed LAI values, the per-leaf-layer light profile
+    ! resolved at each of them (at the reference condition only - the sweeps
+    ! would otherwise write nlevleaf x every sweep point x n_lai layer
+    ! profiles), and every sweep's swept values, derived vapor-pressure/btran
+    ! diagnostics, and canopy-integrated gross/net photosynthesis per LAI.
+
+    ! LOCALS:
+    integer           :: ncid          ! netcdf file id
+    character(len=20) :: dim_names(7)  ! dimension names
+    integer           :: dimIDs(7)     ! dimension IDs
+    integer           :: laiID, layerID, nvID, canopyanetID, canopyagrossID
+    integer           :: parsunID, parshaID, laisunID, laishaID
+    integer           :: nscalerID, rdarkscalerID, anetzID
+    integer           :: parID, co2ID, vpdID, tempID, soilfracID
+    integer           :: vegesatbytempID, canvpressbytempID
+    integer           :: canvpressbyvpdID, btranbysoilfracID
+    integer           :: anetbyparID, agrossbyparID
+    integer           :: anetbyco2ID, agrossbyco2ID
+    integer           :: anetbyvpdID, agrossbyvpdID
+    integer           :: anetbytempID, agrossbytempID
+    integer           :: anetbysoilfracID, agrossbysoilfracID
+
+    dim_names = [character(len=20) :: 'layer', 'lai', 'par', 'co2', 'vpd',     &
+      'temp', 'soilfrac']
+
+    call OpenNCFile(trim(out_file), ncid, 'readwrite')
+    call RegisterNCDims(ncid, dim_names, (/nlevleaf, n_lai, n_par, n_co2,      &
+      n_vpd, n_temp, n_soilfrac/), 7, dimIDs)
+
+    call RegisterVarAtts(ncid, 'layer', dimIDs(1:1), type_int, '-',                     &
+      'leaf layer index, 1 = top of canopy', layerID)
+    call RegisterVarAtts(ncid, 'lai', dimIDs(2:2), type_double, 'm2 m-2',               &
+      'prescribed in-crown canopy leaf area index', laiID)
+    call RegisterVarAtts(ncid, 'nv', dimIDs(2:2), type_int, '-',                        &
+      'number of occupied leaf layers at each prescribed LAI', nvID)
+    call RegisterVarAtts(ncid, 'canopy_anet', dimIDs(2:2), type_double,                 &
+      'umolC m-2 s-1',                                                                  &
+      'canopy net photosynthesis per unit crown footprint area (= per unit ground '//   &
+      'area, this canopy fully covering its footprint), at the reference condition',    &
+      canopyanetID)
+    call RegisterVarAtts(ncid, 'canopy_agross', dimIDs(2:2), type_double,               &
+      'umolC m-2 s-1',                                                                  &
+      'canopy gross photosynthesis per unit crown footprint area (= per unit ground '// &
+      'area, this canopy fully covering its footprint), at the reference condition',    &
+      canopyagrossID)
+
+    call RegisterVarAtts(ncid, 'parsun_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
+      'W m-2', 'absorbed PAR per unit crown footprint area, sunlit leaves', parsunID,   &
+      coordinates='layer lai')
+    call RegisterFillValue(ncid, parsunID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'parsha_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
+      'W m-2', 'absorbed PAR per unit crown footprint area, shaded leaves', parshaID,   &
+      coordinates='layer lai')
+    call RegisterFillValue(ncid, parshaID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'laisun_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
+      'm2 m-2', 'sunlit leaf area index per layer', laisunID, coordinates='layer lai')
+    call RegisterFillValue(ncid, laisunID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'laisha_z', (/dimIDs(1), dimIDs(2)/), type_double,       &
+      'm2 m-2', 'shaded leaf area index per layer', laishaID, coordinates='layer lai')
+    call RegisterFillValue(ncid, laishaID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'nscaler_z', (/dimIDs(1), dimIDs(2)/), type_double, '-', &
+      'nitrogen-scaling factor per layer', nscalerID, coordinates='layer lai')
+    call RegisterFillValue(ncid, nscalerID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'rdark_scaler_z', (/dimIDs(1), dimIDs(2)/), type_double, &
+      '-', 'leaf respiration scaling factor per layer, Atkin et al. (2017) only',       &
+      rdarkscalerID, coordinates='layer lai')
+    call RegisterFillValue(ncid, rdarkscalerID, fates_unset_r8)
+    call RegisterVarAtts(ncid, 'anet_z', (/dimIDs(1), dimIDs(2)/), type_double,         &
+      'umolC m-2 s-1',                                                                  &
+      'area-weighted net photosynthesis per unit leaf area, per layer', anetzID,        &
+      coordinates='layer lai')
+    call RegisterFillValue(ncid, anetzID, fates_unset_r8)
+
+    ! swept coordinates
+    call RegisterVarAtts(ncid, 'par', dimIDs(3:3), type_double,                &
+      'umol m-2 s-1', 'swept incident PPFD at the top of the canopy', parID)
+    call RegisterVarAtts(ncid, 'co2', dimIDs(4:4), type_double, 'Pa',          &
+      'swept CO2 partial pressure', co2ID)
+    call RegisterVarAtts(ncid, 'vpd', dimIDs(5:5), type_double, 'Pa',          &
+      'swept leaf-to-air vapor pressure deficit', vpdID)
+    call RegisterVarAtts(ncid, 'temp', dimIDs(6:6), type_double, 'K',          &
+      'swept leaf temperature', tempID)
+    call RegisterVarAtts(ncid, 'soilfrac', dimIDs(7:7), type_double, '-',      &
+      'swept soil water content, fraction of saturation', soilfracID)
+
+    ! diagnostics derived from the swept values
+    call RegisterVarAtts(ncid, 'veg_esat_bytemp', dimIDs(6:6), type_double,    &
+      'Pa', 'saturation vapor pressure at each swept leaf temperature',        &
+      vegesatbytempID)
+    call RegisterVarAtts(ncid, 'can_vpress_bytemp', dimIDs(6:6), type_double,  &
+      'Pa', 'canopy air vapor pressure at each swept leaf temperature',        &
+      canvpressbytempID)
+    call RegisterVarAtts(ncid, 'can_vpress_byvpd', dimIDs(5:5), type_double,   &
+      'Pa', 'canopy air vapor pressure at each swept VPD', canvpressbyvpdID)
+    call RegisterVarAtts(ncid, 'btran_bysoilfrac', dimIDs(7:7), type_double,   &
+      '-', 'btran derived from each swept soil water content fraction',        &
+      btranbysoilfracID)
+
+    ! canopy-integrated photosynthesis, per sweep and prescribed LAI. All of
+    ! these are per unit crown footprint area, which is the same as per unit ground area
+    ! in this test only because the canopy fully covers its footprint
+    call RegisterVarAtts(ncid, 'canopy_anet_bypar', (/dimIDs(3), dimIDs(2)/),  &
+      type_double, 'umolC m-2 s-1', 'canopy net photosynthesis vs. PAR',       &
+      anetbyparID, coordinates='par lai')
+    call RegisterVarAtts(ncid, 'canopy_agross_bypar', (/dimIDs(3), dimIDs(2)/),&
+      type_double, 'umolC m-2 s-1', 'canopy gross photosynthesis vs. PAR',     &
+      agrossbyparID, coordinates='par lai')
+    call RegisterVarAtts(ncid, 'canopy_anet_byco2', (/dimIDs(4), dimIDs(2)/),  &
+      type_double, 'umolC m-2 s-1', 'canopy net photosynthesis vs. CO2',       &
+      anetbyco2ID, coordinates='co2 lai')
+    call RegisterVarAtts(ncid, 'canopy_agross_byco2', (/dimIDs(4), dimIDs(2)/),&
+      type_double, 'umolC m-2 s-1', 'canopy gross photosynthesis vs. CO2',     &
+      agrossbyco2ID, coordinates='co2 lai')
+    call RegisterVarAtts(ncid, 'canopy_anet_byvpd', (/dimIDs(5), dimIDs(2)/),  &
+      type_double, 'umolC m-2 s-1', 'canopy net photosynthesis vs. VPD',       &
+      anetbyvpdID, coordinates='vpd lai')
+    call RegisterVarAtts(ncid, 'canopy_agross_byvpd', (/dimIDs(5), dimIDs(2)/),&
+      type_double, 'umolC m-2 s-1', 'canopy gross photosynthesis vs. VPD',     &
+      agrossbyvpdID, coordinates='vpd lai')
+    call RegisterVarAtts(ncid, 'canopy_anet_bytemp', (/dimIDs(6), dimIDs(2)/), &
+      type_double, 'umolC m-2 s-1',                                            &
+      'canopy net photosynthesis vs. leaf temperature', anetbytempID,          &
+      coordinates='temp lai')
+    call RegisterVarAtts(ncid, 'canopy_agross_bytemp',                         &
+      (/dimIDs(6), dimIDs(2)/), type_double, 'umolC m-2 s-1',                  &
+      'canopy gross photosynthesis vs. leaf temperature', agrossbytempID,      &
+      coordinates='temp lai')
+    call RegisterVarAtts(ncid, 'canopy_anet_bysoilfrac',                       &
+      (/dimIDs(7), dimIDs(2)/), type_double, 'umolC m-2 s-1',                  &
+      'canopy net photosynthesis vs. soil water content', anetbysoilfracID,    &
+      coordinates='soilfrac lai')
+    call RegisterVarAtts(ncid, 'canopy_agross_bysoilfrac',                     &
+      (/dimIDs(7), dimIDs(2)/), type_double, 'umolC m-2 s-1',                  &
+      'canopy gross photosynthesis vs. soil water content',                    &
+      agrossbysoilfracID, coordinates='soilfrac lai')
+
+    call EndNCDef(ncid)
+    call WriteVar(ncid, layerID, layer_index(:))
+    call WriteVar(ncid, laiID, lai_vals(:))
+    call WriteVar(ncid, nvID, nv_out(:))
+    call WriteVar(ncid, canopyanetID, canopy_anet(:))
+    call WriteVar(ncid, canopyagrossID, canopy_agross(:))
+    call WriteVar(ncid, parsunID, parsun_z_out(:,:))
+    call WriteVar(ncid, parshaID, parsha_z_out(:,:))
+    call WriteVar(ncid, laisunID, laisun_z_out(:,:))
+    call WriteVar(ncid, laishaID, laisha_z_out(:,:))
+    call WriteVar(ncid, nscalerID, nscaler_z_out(:,:))
+    call WriteVar(ncid, rdarkscalerID, rdark_scaler_z_out(:,:))
+    call WriteVar(ncid, anetzID, anet_z_out(:,:))
+
+    call WriteVar(ncid, parID, par_vals(:))
+    call WriteVar(ncid, co2ID, co2_vals(:))
+    call WriteVar(ncid, vpdID, vpd_vals(:))
+    call WriteVar(ncid, tempID, temp_vals(:))
+    call WriteVar(ncid, soilfracID, soilfrac_vals(:))
+
+    call WriteVar(ncid, vegesatbytempID, veg_esat_bytemp(:))
+    call WriteVar(ncid, canvpressbytempID, can_vpress_bytemp(:))
+    call WriteVar(ncid, canvpressbyvpdID, can_vpress_byvpd(:))
+    call WriteVar(ncid, btranbysoilfracID, btran_bysoilfrac(:))
+
+    call WriteVar(ncid, anetbyparID, canopy_anet_bypar(:,:))
+    call WriteVar(ncid, agrossbyparID, canopy_agross_bypar(:,:))
+    call WriteVar(ncid, anetbyco2ID, canopy_anet_byco2(:,:))
+    call WriteVar(ncid, agrossbyco2ID, canopy_agross_byco2(:,:))
+    call WriteVar(ncid, anetbyvpdID, canopy_anet_byvpd(:,:))
+    call WriteVar(ncid, agrossbyvpdID, canopy_agross_byvpd(:,:))
+    call WriteVar(ncid, anetbytempID, canopy_anet_bytemp(:,:))
+    call WriteVar(ncid, agrossbytempID, canopy_agross_bytemp(:,:))
+    call WriteVar(ncid, anetbysoilfracID, canopy_anet_bysoilfrac(:,:))
+    call WriteVar(ncid, agrossbysoilfracID, canopy_agross_bysoilfrac(:,:))
+
+    call CloseNCFile(ncid)
+
+  end subroutine WriteOutput
 
   ! ==========================================================================
-  
-  
   
 
 end program FatesCanopyLevelPhoto
