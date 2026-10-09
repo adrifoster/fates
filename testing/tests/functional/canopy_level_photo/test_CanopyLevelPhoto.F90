@@ -1,0 +1,377 @@
+program FatesCanopyLevelPhoto
+  !
+  ! DESCRIPTION:
+  ! Canopy-level photosynthesis sensitivity sweep: five independent sweeps (PAR,
+  ! CO2, VPD, leaf temperature, and soil water content), each varying one
+  ! driver variable while holding everything else at a fixed default,
+  ! evaluated for a single PFT
+  !
+  ! The Kumarathunge et al. (2019) temperature-acclimation model uses two running-mean
+  ! reference temperatures (t_growth, t_home) in addition to the instantaneous leaf
+  ! temperature being swept. Both are held fixed at the same default leaf temperature
+  ! for every sweep and every point.
+  !
+  ! The soil water content sweep does not vary btran directly. It sweeps a soil
+  ! water content fraction in [0, 1], maps it onto a soil matric potential, since 
+  ! these drivers have no soil texture from which a real retention curve could be built), 
+  ! and derives btran from that via BtranFromSMP, which is production's own 
+  ! EDBtranMod.F90::btran_ed formula specialized to the single unfrozen layer at 
+  ! root fraction 1 these drivers assume
+  !
+  ! The prescribed canopy is a slab that fully covers its own footprint (light_env's 
+  ! single scattering element area = 1). The crown footprint is equal to patch area, 
+  ! and per-crown-area and per-ground-area fluxes are thus equal. The TwoStream solver 
+  ! returns fluxes in m2/crown footprint, but since this is equal to per m2 ground, 
+  ! that is what the units say
+  !
+
+  use FatesConstantsMod,           only : r8 => fates_r8
+  use FatesConstantsMod,           only : fates_unset_r8
+  use FatesConstantsMod,           only : t_water_freeze_k_1atm
+  use FatesConstantsMod,           only : wm2_to_umolm2s
+  use EDParamsMod,                 only : nlevleaf
+  use EDParamsMod,                 only : GetNVegLayers
+  use FatesArgumentUtils,          only : command_line_arg
+  use FatesUnitTestParamReaderMod, only : ReadParameters, CheckLeafRespParams
+  use EDPftvarcon,                 only : EDPftvarcon_inst
+  use FatesParameterDerivedMod,    only : param_derived
+  use FatesFactoryMod,             only : InitializeGlobals
+  use LeafBiophysicsMod,           only : lb_params
+  use LeafBiophysicsMod,           only : GetCanopyGasParameters
+  use FatesInterfaceTypesMod,      only : hlm_maintresp_leaf_model
+  use FatesConstantsMod,           only : lmrmodel_ryan_1991, lmrmodel_atkin_etal_2017
+  use LeafBiophysicsMod,           only : FvCB1980, medlyn_model, net_assim_model
+  use LeafBiophysicsMod,           only : photosynth_acclim_model_kumarathunge_etal_2019
+  use FatesTestLeafPhotoMod,       only : LeafNitrogenContent, LeafLayerVerticalScaling
+  use FatesTestLeafPhotoMod,       only : leaf_capacity_type
+  use FatesTestLeafPhotoMod,       only : LeafLayerCapacity
+  use FatesTestLeafPhotoMod,       only : LeafLayerSunShade
+  use FatesTestEnvironmentMod,     only : environment_type
+  use FatesTestLightEnvMod,        only : light_env_type
+
+  implicit none
+
+  ! LOCALS: 
+  type(environment_type)        :: env                     ! prescribed atmospheric boundary conditions
+  type(light_env_type)          :: light_env               ! prescribed light environment for the current LAI
+  character(len=:), allocatable :: param_file              ! input parameter file
+  character(len=:), allocatable :: out_file                ! output file name
+  real(r8),         allocatable :: parsun_z_out(:,:)       ! absorbed PAR, sunlit [W/m2 crown footprint]
+  real(r8),         allocatable :: parsha_z_out(:,:)       ! absorbed PAR, shaded [W/m2 crown footprint]
+  real(r8),         allocatable :: laisun_z_out(:,:)       ! sunlit leaf area index [m2 leaf/m2 crown footprint]
+  real(r8),         allocatable :: laisha_z_out(:,:)       ! shaded leaf area index [m2 leaf/m2 crown footprint]
+  real(r8),         allocatable :: nscaler_z_out(:,:)      ! per-layer nitrogen-scaling factor [0-1]
+  real(r8),         allocatable :: rdark_scaler_z_out(:,:) ! per-layer respiration-scaling factor [0-1]
+  real(r8),         allocatable :: anet_z_out(:,:)         ! per-layer area-weighted net photosynthesis [umolC/m2 leaf/s]
+  integer,          allocatable :: nv_out(:)               ! number of occupied leaf layers at each prescribed LAI
+  integer,          allocatable :: layer_index(:)          ! leaf-layer index coordinate [1..nlevleaf]
+  real(r8),         allocatable :: nscaler_z(:)            ! per-leaf-layer nitrogen-scaling factor [0-1]
+  real(r8),         allocatable :: rdark_scaler_z(:)       ! per-leaf-layer respiration-scaling factor [0-1]
+  real(r8),         allocatable :: par_vals(:)             ! swept PAR values [umol/m2/s]
+  real(r8),         allocatable :: co2_vals(:)             ! swept CO2 partial pressure values [Pa]
+  real(r8),         allocatable :: vpd_vals(:)             ! swept leaf-to-air VPD values [Pa]
+  real(r8),         allocatable :: temp_vals(:)            ! swept leaf temperature values [K]
+  real(r8),         allocatable :: soilfrac_vals(:)        ! swept soil water content, fraction of saturation [0-1]
+  real(r8),         allocatable :: veg_esat_bytemp(:)      ! saturation vapor pressure at each swept leaf temperature [Pa]
+  real(r8),         allocatable :: can_vpress_bytemp(:)    ! canopy air vapor pressure at each swept leaf temperature, fixed default VPD [Pa]
+  real(r8),         allocatable :: can_vpress_byvpd(:)     ! canopy air vapor pressure at each swept VPD (= veg_esat - vpd), fixed default leaf temperature [Pa]
+  real(r8),         allocatable :: btran_bysoilfrac(:)     ! btran derived from each swept soil water content fraction [0-1]
+  real(r8)                      :: lnc_top                 ! leaf N content at the canopy top [gN/m2 leaf]
+  real(r8)                      :: vcmax25top              ! top-of-canopy carboxylation rate at 25degC [umol/m2/s]
+  real(r8)                      :: jmax25top               ! top-of-canopy electron transport rate at 25degC [umol/m2/s]
+  real(r8)                      :: kp25top                 ! top-of-canopy initial slope of C4 CO2 response at 25degC [umol/m2/s]
+  real(r8)                      :: smpsc                   ! soil matric potential at full stomatal closure [mm, negative]
+  real(r8)                      :: smpso                   ! soil matric potential at full stomatal opening [mm, negative]
+  integer                       :: n_par                   ! PAR sweep array size 
+  integer                       :: n_co2                   ! CO2 sweep array size 
+  integer                       :: n_vpd                   ! VPD sweep array size 
+  integer                       :: n_temp                  ! temperature sweep array size 
+  integer                       :: n_soilfrac              ! soilfrac sweep array size
+  integer                       :: iv                      ! leaf-layer looping index
+  integer                       :: ilai                    ! prescribed-LAI looping index
+  integer                       :: i                       ! sweep looping index
+  
+  ! sweep output, each dimensioned by (n_sweep_points, n_lai)
+  real(r8), allocatable :: canopy_anet_bypar(:,:), canopy_agross_bypar(:,:)
+  real(r8), allocatable :: canopy_anet_byco2(:,:), canopy_agross_byco2(:,:)
+  real(r8), allocatable :: canopy_anet_byvpd(:,:), canopy_agross_byvpd(:,:)
+  real(r8), allocatable :: canopy_anet_bytemp(:,:), canopy_agross_bytemp(:,:)
+  real(r8), allocatable :: canopy_anet_bysoilfrac(:,:), canopy_agross_bysoilfrac(:,:)
+  
+  ! output for reference case
+  real(r8), allocatable :: canopy_anet(:), canopy_agross(:)
+  
+  ! CONSTANTS:
+  real(r8), parameter :: canopy_sai = 0.0_r8                 ! prescribed in-crown stem area index [m2 stem/m2 crown footprint]
+  real(r8), parameter :: canopy_height = 20.0_r8             ! prescribed canopy height [m]
+  real(r8), parameter :: diagnostic_coszen = 1.0_r8          ! cosine of solar zenith angle (sun directly overhead)
+  real(r8), parameter :: direct_frac = 0.85_r8               ! fraction of incident PAR that is direct beam (typical clear sky)
+  real(r8), parameter :: diffuse_frac = 1.0_r8 - direct_frac ! fraction of incident PAR that is diffuse
+  integer,  parameter :: n_lai = 3                           ! number of LAI canopies to test
+  integer,  parameter :: target_pft = 1                      ! PFT index to evaluate (1-based)
+
+  ! prescribed in-crown leaf area index [m2 leaf/m2 crown footprint]
+  real(r8), parameter :: lai_vals(n_lai) = [1.0_r8, 3.0_r8, 7.0_r8] 
+  
+  ! sweep ranges
+  real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
+  real(r8), parameter :: min_par  = 0.0_r8,    max_par  = 2500.0_r8,  par_inc  = 5.0_r8   ! [umol/m2/s]
+  real(r8), parameter :: min_vpd  = 500.0_r8,  max_vpd  = 2500.0_r8,  vpd_inc  = 20.0_r8  ! [Pa] (0.5-2.5 kPa)
+  real(r8), parameter :: min_co2  = 50.0_r8,  max_co2  = 1500.0_r8,  co2_inc  = 5.0_r8   ! [umol/mol]
+  real(r8), parameter :: soilfrac_inc = 0.02_r8 ! [0-1]
+  
+  ! --------------------------------------------------------------------------------------
+  ! Initial setup - read parameter file, initialize globals
+  ! --------------------------------------------------------------------------------------
+  
+  ! read in parameter file name from command line
+  param_file = command_line_arg(1)
+  
+  ! output file name, depends on either arg2 or is just default
+  if (command_argument_count() >= 2) then
+    out_file = trim(command_line_arg(2))
+  else
+    out_file = 'canopy_level_photo_out.nc'
+  end if
+  
+  ! read in parameter file
+  call ReadParameters(param_file)
+  
+  ! initialize global values
+  call InitializeGlobals()
+  
+  ! host-model-namelist-controlled leaf biophysics switches
+  hlm_maintresp_leaf_model = lmrmodel_ryan_1991
+  lb_params%electron_transport_model = FvCB1980
+  lb_params%stomatal_model = medlyn_model
+  lb_params%stomatal_assim_model = net_assim_model
+  lb_params%photo_tempsens_model = photosynth_acclim_model_kumarathunge_etal_2019
+  
+  ! do a parameter check for Atkin parameters
+  call CheckLeafRespParams()
+  
+  ! leaf N content and reference (25C, canopy-top) photosynthetic capacity for target_pft
+  lnc_top = LeafNitrogenContent(target_pft)
+  vcmax25top = EDPftvarcon_inst%vcmax25top(target_pft,1)
+  jmax25top = param_derived%jmax25top(target_pft,1)
+  kp25top = param_derived%kp25top(target_pft,1)
+  
+  ! soil stress parameters for target_pft
+  smpsc = EDPftvarcon_inst%smpsc(target_pft)
+  smpso = EDPftvarcon_inst%smpso(target_pft)
+  
+  ! set atmospheric defaults
+  call env%Init()
+  
+  ! --------------------------------------------------------------------------------------
+  ! build the swept-value arrays and the diagnostics derived from them
+  ! --------------------------------------------------------------------------------------
+  
+  allocate(parsun_z_out(nlevleaf, n_lai), parsha_z_out(nlevleaf, n_lai))
+  allocate(laisun_z_out(nlevleaf, n_lai), laisha_z_out(nlevleaf, n_lai))
+  allocate(nscaler_z_out(nlevleaf, n_lai), rdark_scaler_z_out(nlevleaf, n_lai))
+  allocate(anet_z_out(nlevleaf, n_lai))
+  allocate(nv_out(n_lai), layer_index(nlevleaf))
+  
+  ! layers above a given LAI's actual nv are never written, and keep this fill
+  ! value (registered as each variable's _FillValue below)
+  parsun_z_out(:,:) = fates_unset_r8
+  parsha_z_out(:,:) = fates_unset_r8
+  laisun_z_out(:,:) = fates_unset_r8
+  laisha_z_out(:,:) = fates_unset_r8
+  nscaler_z_out(:,:) = fates_unset_r8
+  rdark_scaler_z_out(:,:) = fates_unset_r8
+  anet_z_out(:,:) = fates_unset_r8
+  
+  do iv = 1, nlevleaf
+    layer_index(iv) = iv
+  end do
+  
+  n_par = int((max_par - min_par)/par_inc) + 1
+  n_co2 = int((max_co2 - min_co2)/co2_inc) + 1
+  n_vpd = int((max_vpd - min_vpd)/vpd_inc) + 1
+  n_temp = int((max_temp - min_temp)/temp_inc) + 1
+  n_soilfrac = int((1.0_r8 - 0.0_r8)/soilfrac_inc) + 1
+  
+  allocate(par_vals(n_par))
+  allocate(co2_vals(n_co2))
+  allocate(vpd_vals(n_vpd))
+  allocate(temp_vals(n_temp))
+  allocate(soilfrac_vals(n_soilfrac))
+  
+  do i = 1, n_par
+    par_vals(i) = min_par + par_inc*real(i-1, r8)
+  end do
+  do i = 1, n_co2
+    ! ppm -> Pa, at the default (Init()-prescribed) canopy pressure
+    co2_vals(i) = ((min_co2 + co2_inc*real(i-1, r8))/1.0e6_r8) * env%can_press
+  end do
+  do i = 1, n_vpd
+    vpd_vals(i) = min_vpd + vpd_inc*real(i-1, r8)
+  end do
+  do i = 1, n_temp
+    temp_vals(i) = (min_temp + temp_inc*real(i-1, r8)) + t_water_freeze_k_1atm
+  end do
+  do i = 1, n_soilfrac
+    soilfrac_vals(i) = 0.0_r8 + soilfrac_inc*real(i-1, r8)
+  end do
+  
+  allocate(veg_esat_bytemp(n_temp), can_vpress_bytemp(n_temp))
+  allocate(can_vpress_byvpd(n_vpd))
+  allocate(btran_bysoilfrac(n_soilfrac))
+  
+  allocate(canopy_anet_bypar(n_par, n_lai), canopy_agross_bypar(n_par, n_lai))
+  allocate(canopy_anet_byco2(n_co2, n_lai), canopy_agross_byco2(n_co2, n_lai))
+  allocate(canopy_anet_byvpd(n_vpd, n_lai), canopy_agross_byvpd(n_vpd, n_lai))
+  allocate(canopy_anet_bytemp(n_temp, n_lai), canopy_agross_bytemp(n_temp, n_lai))
+  allocate(canopy_anet_bysoilfrac(n_soilfrac, n_lai), canopy_agross_bysoilfrac(n_soilfrac, n_lai))
+  
+  allocate(canopy_anet(n_lai), canopy_agross(n_lai))
+  
+  ! ---------------------------------------------------------------------
+  ! Sweeps per LAI
+  ! ---------------------------------------------------------------------
+  
+  do ilai = 1, n_lai
+    ! build the prescribed canopy's two-stream light environment
+    call light_env%Init(lai_vals(ilai), canopy_sai, canopy_height, target_pft)
+    
+    ! get the number of leaf layers
+    nv_out(ilai) = GetNVegLayers(lai_vals(ilai) + canopy_sai)
+    
+    ! this canopy's per-layer vertical scaling - the decay of photosynthetic
+    ! capacity and of leaf respiration with cumulative leaf area above each layer
+    if (allocated(nscaler_z)) deallocate(nscaler_z, rdark_scaler_z)
+    allocate(nscaler_z(nv_out(ilai)), rdark_scaler_z(nv_out(ilai)))
+    call LeafLayerVerticalScaling(lai_vals(ilai), canopy_sai, canopy_height,   &
+      nv_out(ilai), target_pft, vcmax25top, 0.0_r8, nscaler_z, rdark_scaler_z)
+    
+    ! -----------------------------------------------------------------------------
+    ! Initial call to get reference photosynthesis output and per-leaf-layer output
+    ! -----------------------------------------------------------------------------
+    call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z,            &
+      env%par/wm2_to_umolm2s, direct_frac, env%tempk, env%tempk, env%tempk, &
+      env%veg_esat, env%can_press, env%can_vpress, env%can_co2_ppress,      &
+      env%can_o2_ppress, env%btran, env%gb, env%dayl_factor, vcmax25top,    &
+      canopy_anet(ilai), canopy_agross(ilai), store_profile=.true., ilai_store=ilai)
+      
+    ! ---------------------------------------------------------------------
+    ! PAR sweep
+    ! ---------------------------------------------------------------------
+    do i = 1, n_par
+      call CanopyNetAssim(nv_out(ilai), nscaler_z, rdark_scaler_z,     &
+        par_vals(i)/wm2_to_umolm2s, direct_frac, env%tempk, env%tempk, &
+        env%tempk, env%veg_esat, env%can_press, env%can_vpress,        &
+        env%can_co2_ppress, env%can_o2_ppress, env%btran, env%gb,      &
+        env%dayl_factor, vcmax25top, canopy_anet_bypar(i,ilai),        &
+        canopy_agross_bypar(i,ilai))
+    end do
+    
+    ! free the light environment
+    call light_env%Free()
+  
+  end do 
+  
+  contains 
+  
+  ! ==========================================================================
+
+  subroutine CanopyNetAssim(nv, nscaler_z, rdark_scaler_z, par_toc, beam_frac,    &
+    veg_tempk, t_growth, t_home, veg_esat, can_press, can_vpress, can_co2_ppress, &
+    can_o2_ppress, btran, gb, dayl_factor, vcmax25top, canopy_anet_out,           &
+    canopy_agross_out, store_profile, ilai_store)
+    !
+    ! DESCRIPTION:
+    ! Integrate leaf photosynthesis through a canopy
+
+    ! ARGUMENTS:
+    integer,  intent(in)           :: nv                ! number of occupied leaf layers
+    real(r8), intent(in)           :: nscaler_z(:)      ! per-leaf-layer nitrogen-scaling factor [0-1]
+    real(r8), intent(in)           :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1]
+    real(r8), intent(in)           :: par_toc           ! incident PAR at the top of the canopy [W/m2]
+    real(r8), intent(in)           :: beam_frac         ! fraction of par_toc arriving as direct beam [0-1]
+    real(r8), intent(in)           :: veg_tempk         ! instantaneous leaf temperature [K]
+    real(r8), intent(in)           :: t_growth          ! 10-day running-mean growth temperature [K]
+    real(r8), intent(in)           :: t_home            ! long-term running-mean home temperature [K]
+    real(r8), intent(in)           :: veg_esat          ! saturation vapor pressure at veg_tempk [Pa]
+    real(r8), intent(in)           :: can_press         ! air pressure at the leaf surface [Pa]
+    real(r8), intent(in)           :: can_vpress        ! canopy air vapor pressure [Pa]
+    real(r8), intent(in)           :: can_co2_ppress    ! CO2 partial pressure at the leaf surface [Pa]
+    real(r8), intent(in)           :: can_o2_ppress     ! O2 partial pressure at the leaf surface [Pa]
+    real(r8), intent(in)           :: btran             ! soil moisture stress factor [0-1]
+    real(r8), intent(in)           :: gb                ! leaf boundary layer conductance [umol/m2/s]
+    real(r8), intent(in)           :: dayl_factor       ! day lenghth factor [0-1
+    real(r8), intent(in)           :: vcmax25top        ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
+    real(r8), intent(out)          :: canopy_anet_out   ! canopy net photosynthesis [umolC/m2 crown footprint/s]
+    real(r8), intent(out)          :: canopy_agross_out ! canopy gross photosynthesis [umolC/m2 crown footprint/s]
+    logical,  intent(in), optional :: store_profile     ! also fill the per-layer output arrays (default .false.)
+    integer,  intent(in), optional :: ilai_store        ! output-array column to fill when store_profile is set
+
+    ! LOCALS:
+    type(leaf_capacity_type) :: cap          ! this layer's capacity/dark respiration at the swept conditions
+    real(r8)                 :: mm_kco2      ! Michaelis-Menten constant for CO2 at veg_tempk [Pa]
+    real(r8)                 :: mm_ko2       ! Michaelis-Menten constant for O2 at veg_tempk [Pa]
+    real(r8)                 :: co2_cpoint   ! Michaelis-Menten constant for CO2 compenstation point at veg_tempk [Pa]
+    real(r8)                 :: agross_layer ! area-weighted gross photosynthesis for this layer [umolC/m2 leaf/s]
+    real(r8)                 :: anet_layer   ! area-weighted net photosynthesis for this layer [umolC/m2 leaf/s]
+    real(r8)                 :: lai_layer    ! this layer's total leaf area index [m2 leaf/m2 crown footprint]
+    logical                  :: do_store     ! resolved store_profile
+    integer                  :: iv           ! leaf-layer looping index
+    
+    do_store = .false.
+    if (present(store_profile)) do_store = store_profile
+
+    ! attenuate the incident PAR through this canopy at the prescribed
+    ! overhead-sun geometry
+    call light_env%AttenuateCanopy(beam_frac*par_toc,             &
+      (1.0_r8 - beam_frac)*par_toc, diagnostic_coszen,            &
+      light_env%parsun_z, light_env%parsha_z, light_env%laisun_z, &
+      light_env%laisha_z)
+
+    ! the Michaelis-Menten constants/CO2 compensation points
+    call GetCanopyGasParameters(can_press, can_co2_ppress, veg_tempk, mm_kco2, mm_ko2, &
+      co2_cpoint)
+
+    canopy_anet_out = 0.0_r8
+    canopy_agross_out = 0.0_r8
+    do iv = 1, nv
+
+      ! this layer's capacity
+      call LeafLayerCapacity(target_pft, veg_tempk, t_growth, t_home,       &
+        nscaler_z(iv), rdark_scaler_z(iv), dayl_factor, btran, vcmax25top,  &
+        jmax25top, kp25top, lnc_top, cap)
+
+      ! sunlit and shaded leaves in this layer, area-weighted into one rate
+      call LeafLayerSunShade(target_pft, cap, light_env%parsun_z(iv),  &
+        light_env%parsha_z(iv), light_env%laisun_z(iv),                &
+        light_env%laisha_z(iv), veg_tempk, can_press, can_co2_ppress,  &
+        can_o2_ppress, veg_esat, can_vpress, gb, mm_kco2, mm_ko2,      &
+        co2_cpoint, agross_layer, anet_layer, lai_layer)
+
+      ! scaled by this layer's leaf area index: [umolC/m2 leaf/s] *
+      ! [m2 leaf/m2 crown footprint] -> [umolC/m2 crown footprint/s].
+      canopy_anet_out = canopy_anet_out + anet_layer * lai_layer
+      canopy_agross_out = canopy_agross_out + agross_layer * lai_layer
+
+      if (do_store) then
+        parsun_z_out(iv, ilai_store)  = light_env%parsun_z(iv)
+        parsha_z_out(iv, ilai_store)  = light_env%parsha_z(iv)
+        laisun_z_out(iv, ilai_store)  = light_env%laisun_z(iv)
+        laisha_z_out(iv, ilai_store)  = light_env%laisha_z(iv)
+        nscaler_z_out(iv, ilai_store) = nscaler_z(iv)
+        rdark_scaler_z_out(iv, ilai_store) = rdark_scaler_z(iv)
+        anet_z_out(iv, ilai_store)    = anet_layer
+      end if
+
+    end do
+
+  end subroutine CanopyNetAssim
+
+  ! ==========================================================================
+  
+  
+  
+
+end program FatesCanopyLevelPhoto
+
+! ----------------------------------------------------------------------------------------

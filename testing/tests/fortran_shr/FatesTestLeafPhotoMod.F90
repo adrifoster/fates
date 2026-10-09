@@ -5,16 +5,22 @@ module FatesTestLeafPhotoMod
   !
   
   use FatesConstantsMod,      only : r8 => fates_r8
+  use FatesConstantsMod,      only : nearzero
   use FatesInterfaceTypesMod, only : hlm_maintresp_leaf_model
   use FatesConstantsMod,      only : lmrmodel_ryan_1991
   use FatesConstantsMod,      only : lmrmodel_atkin_etal_2017
   use PRTParametersMod,       only : prt_params
   use PRTGenericMod,          only : leaf_organ
+  use EDPftvarcon,            only : EDPftvarcon_inst
+  use PRTParametersMod,       only : prt_params
+  use LeafBiophysicsMod,      only : ConvertPar
   use LeafBiophysicsMod,      only : GetCanopyGasParameters
   use LeafBiophysicsMod,      only : LeafLayerBiophysicalRates
   use LeafBiophysicsMod,      only : LeafLayerPhotosynthesis
   use LeafBiophysicsMod,      only : LeafLayerMaintenanceRespiration_Ryan_1991
   use LeafBiophysicsMod,      only : LeafLayerMaintenanceRespiration_Atkin_etal_2017
+  use LeafBiophysicsMod,      only : DecayCoeffVcmax
+  use FatesAllometryMod,      only : VegAreaLayer
   
   implicit none
   private
@@ -36,6 +42,9 @@ module FatesTestLeafPhotoMod
 
   public :: LeafNitrogenContent
   public :: EvaluateLeafPhotosynthesis
+  public :: LeafLayerVerticalScaling
+  public :: LeafLayerCapacity
+  public :: LeafLayerSunShade
   
   contains 
   
@@ -181,5 +190,176 @@ module FatesTestLeafPhotoMod
     end select
 
   end subroutine LeafLayerCapacity
+  
+  ! ==========================================================================
+  
+  subroutine LeafLayerVerticalScaling(treelai, treesai, height, nv, pft,        &
+    vcmax25top, lai_above_in, nscaler_z, rdark_scaler_z, vert_scaler_min)
+    !
+    ! DESCRIPTION:
+    ! Per-leaf-layer vertical-scaling factors, the decay of photosynthetic
+    ! capacity (nscaler) and of leaf maintenance respiration (rdark_scaler)
+    ! with cumulative leaf area above a layer
+    !
+    ! Both profiles share the same cumulative LAI and differ only in their
+    ! decay coefficient: nscaler follows leafn_vert_scaler_coeff1/2 and
+    ! rdark_scaler follows maintresp_leaf_vert_scaler_coeff1/2. rdark_scaler
+    ! is used by the Atkin et al. (2017) respiration model only, and is
+    ! computed regardless of which model is selected
+    !
+    ! Depends only on canopy structure (treelai/treesai/height/nv) and the
+    ! reference canopy-top capacity
+    !
+    ! The prescribed exponentials have no lower bound, so at large cumulative
+    ! LAI they extrapolate below any viable leaf nitrogen content.
+    ! vert_scaler_min, when supplied, floors both profiles at a minimum viable
+    ! fraction of canopy-top capacity. The two decay coefficients differ, so the
+    ! floor binds at different cumulative LAI in each
+    !
+    ! Snow depth is fixed at zero
+    !
+
+    ! ARGUMENTS:
+    real(r8), intent(in)           :: treelai           ! in-crown leaf area index [m2 leaf/m2 crown footprint]
+    real(r8), intent(in)           :: treesai           ! in-crown stem area index [m2 stem/m2 crown footprint]
+    real(r8), intent(in)           :: height            ! plant/canopy height [m]
+    real(r8), intent(in)           :: lai_above_in      ! lai above the cohort
+    integer,  intent(in)           :: nv                ! number of occupied leaf layers
+    integer,  intent(in)           :: pft               ! plant functional type index
+    real(r8), intent(in)           :: vcmax25top        ! reference (25C, canopy-top) maximum carboxylation rate [umol/m2/s]
+    real(r8), intent(out)          :: nscaler_z(:)      ! per-leaf-layer nitrogen-scaling factor [0-1], first nv entries filled
+    real(r8), intent(out)          :: rdark_scaler_z(:) ! per-leaf-layer respiration-scaling factor [0-1], first nv entries filled
+    real(r8), intent(in), optional :: vert_scaler_min   ! floor on both scaling factors, unbounded if absent [0-1]
+
+    ! LOCALS:
+    integer  :: iv                     ! leaf-layer looping index
+    real(r8) :: vai_top, vai_bot       ! vegetation area index bounds of the current leaf layer
+    real(r8) :: elai_layer, esai_layer ! exposed leaf/stem area index of the current leaf layer
+    real(r8) :: cumulative_lai         ! LAI above the middle of the current leaf layer
+    real(r8) :: lai_above              ! running LAI above the current leaf layer
+    real(r8) :: kn                     ! nitrogen vertical-scaling decay coefficient
+    real(r8) :: kn_rdark               ! respiration vertical-scaling decay coefficient
+
+    real(r8), parameter :: snow_depth = 0.0_r8 ! no snow modeled in any standalone test driver [m]
+
+    ! loop-invariant: depends only on pft and the reference canopy-top
+    ! capacity, neither of which varies by layer
+    kn = DecayCoeffVcmax(vcmax25top, prt_params%leafn_vert_scaler_coeff1(pft), &
+      prt_params%leafn_vert_scaler_coeff2(pft))
+    kn_rdark = DecayCoeffVcmax(vcmax25top,                                    &
+      EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff1(pft),                &
+      EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff2(pft))
+
+    lai_above = lai_above_in
+    do iv = 1, nv
+      call VegAreaLayer(treelai, treesai, height, iv, nv, pft, snow_depth,     &
+        vai_top, vai_bot, elai_layer, esai_layer)
+      cumulative_lai = lai_above + 0.5_r8*elai_layer
+      lai_above = lai_above + elai_layer
+      nscaler_z(iv) = exp(-kn*cumulative_lai)
+      rdark_scaler_z(iv) = exp(-kn_rdark*cumulative_lai)
+      if (present(vert_scaler_min)) then
+        nscaler_z(iv) = max(nscaler_z(iv), vert_scaler_min)
+        rdark_scaler_z(iv) = max(rdark_scaler_z(iv), vert_scaler_min)
+      end if
+    end do
+
+  end subroutine LeafLayerVerticalScaling
+  
+  ! ==========================================================================
+
+  function SunlitFraction(laisun_z, laisha_z) result(fsun)
+    !
+    ! DESCRIPTION:
+    ! Sunlit fraction of one leaf layer's leaf area, for area-weighting that
+    ! layer's sunlit and shaded photosynthesis into a single per-layer rate.
+    ! Returns zero for a layer holding effectively no leaf area at all
+
+    ! ARGUMENTS:
+    real(r8), intent(in) :: laisun_z ! this layer's sunlit leaf area index [m2 leaf/m2 crown footprint]
+    real(r8), intent(in) :: laisha_z ! this layer's shaded leaf area index [m2 leaf/m2 crown footprint]
+    real(r8)             :: fsun     ! sunlit fraction of this layer's leaf area [0-1]
+
+    if (laisun_z + laisha_z > nearzero) then
+      fsun = laisun_z / (laisun_z + laisha_z)
+    else
+      fsun = 0.0_r8
+    end if
+
+  end function SunlitFraction
+
+  ! ==========================================================================
+  
+  ! ==========================================================================
+  
+  subroutine LeafLayerSunShade(pft, cap, par_sun_z, par_sha_z, lai_sun_z,        &
+    lai_sha_z, veg_tempk, can_press, can_co2_ppress, can_o2_ppress, veg_esat,    &
+    can_vpress, gb, mm_kco2, mm_ko2, co2_cpoint, agross_layer, anet_layer,       &
+    lai_layer, solve_iter_sun, solve_iter_sha)
+    !
+    ! DESCRIPTION:
+    ! One leaf layer's sunlit and shaded photosynthesis at a given capacity,
+    ! area-weighted by that layer's sunlit fraction into a single per-layer rate
+    ! per unit leaf area
+
+    ! ARGUMENTS:
+    integer,  intent(in)                 :: pft            ! plant functional type index
+    type(leaf_capacity_type), intent(in) :: cap            ! this layer's capacity/dark respiration (see LeafLayerCapacity)
+    real(r8), intent(in)                 :: par_sun_z      ! absorbed PAR, sunlit leaves, this layer [W/m2 crown footprint]
+    real(r8), intent(in)                 :: par_sha_z      ! absorbed PAR, shaded leaves, this layer [W/m2 crown footprint]
+    real(r8), intent(in)                 :: lai_sun_z      ! sunlit leaf area index, this layer [m2 leaf/m2 crown footprint]
+    real(r8), intent(in)                 :: lai_sha_z      ! shaded leaf area index, this layer [m2 leaf/m2 crown footprint]
+    real(r8), intent(in)                 :: veg_tempk      ! leaf temperature [K]
+    real(r8), intent(in)                 :: can_press      ! air pressure at the leaf surface [Pa]
+    real(r8), intent(in)                 :: can_co2_ppress ! CO2 partial pressure at the leaf surface [Pa]
+    real(r8), intent(in)                 :: can_o2_ppress  ! O2 partial pressure at the leaf surface [Pa]
+    real(r8), intent(in)                 :: veg_esat       ! saturation vapor pressure at veg_tempk [Pa]
+    real(r8), intent(in)                 :: can_vpress     ! vapor pressure of the canopy air [Pa]
+    real(r8), intent(in)                 :: gb             ! leaf boundary layer conductance [umol/m2/s]
+    real(r8), intent(in)                 :: mm_kco2        ! Michaelis-Menten constant for CO2 at veg_tempk [Pa]
+    real(r8), intent(in)                 :: mm_ko2         ! Michaelis-Menten constant for O2 at veg_tempk [Pa]
+    real(r8), intent(in)                 :: co2_cpoint     ! CO2 compensation point at veg_tempk [Pa]
+    real(r8), intent(out)                :: agross_layer   ! area-weighted gross photosynthesis for this layer [umolC/m2 leaf/s]
+    real(r8), intent(out)                :: anet_layer     ! area-weighted net photosynthesis for this layer [umolC/m2 leaf/s]
+    real(r8), intent(out)                :: lai_layer      ! this layer's total leaf area index [m2 leaf/m2 crown footprint]
+    integer,  intent(out), optional      :: solve_iter_sun ! Ci-solver iteration count, sunlit call, for callers tracking solver diagnostics
+    integer,  intent(out), optional      :: solve_iter_sha ! Ci-solver iteration count, shaded call, for callers tracking solver diagnostics
+
+    ! LOCALS:
+    real(r8) :: par_abs                  ! absorbed PAR per unit leaf area [umol photons/m2 leaf/s]
+    real(r8) :: agross_sun, agross_sha   ! gross photosynthesis, sunlit/shaded [umolC/m2 leaf/s]
+    real(r8) :: anet_sun, anet_sha       ! net photosynthesis, sunlit/shaded [umolC/m2 leaf/s]
+    real(r8) :: gs_sun, gs_sha           ! stomatal conductance, sunlit/shaded (unused diagnostic here)
+    real(r8) :: ci_sun, ci_sha           ! intracellular CO2, sunlit/shaded (unused diagnostic here)
+    real(r8) :: c13disc_sun, c13disc_sha ! carbon-13 discrimination, sunlit/shaded (unused diagnostic here)
+    real(r8) :: fsun                     ! sunlit fraction of this layer's leaf area [0-1]
+    integer  :: solve_iter_sun_l         ! Ci-solver iteration count, sunlit call
+    integer  :: solve_iter_sha_l         ! Ci-solver iteration count, shaded call
+
+    par_abs = ConvertPar(lai_sun_z, par_sun_z)
+    call LeafLayerPhotosynthesis(par_abs, pft, cap%vcmax, cap%jmax, cap%kp,       &
+      cap%gs0, cap%gs1, cap%gs2, veg_tempk, can_press, can_co2_ppress,           &
+      can_o2_ppress, veg_esat, gb, can_vpress, mm_kco2, mm_ko2, co2_cpoint,      &
+      cap%lmr, ci_tol, agross_sun, gs_sun, anet_sun, c13disc_sun, ci_sun,        &
+      solve_iter_sun_l)
+
+    par_abs = ConvertPar(lai_sha_z, par_sha_z)
+    call LeafLayerPhotosynthesis(par_abs, pft, cap%vcmax, cap%jmax, cap%kp,       &
+      cap%gs0, cap%gs1, cap%gs2, veg_tempk, can_press, can_co2_ppress,           &
+      can_o2_ppress, veg_esat, gb, can_vpress, mm_kco2, mm_ko2, co2_cpoint,      &
+      cap%lmr, ci_tol, agross_sha, gs_sha, anet_sha, c13disc_sha, ci_sha,        &
+      solve_iter_sha_l)
+
+    fsun = SunlitFraction(lai_sun_z, lai_sha_z)
+    agross_layer = fsun*agross_sun + (1.0_r8 - fsun)*agross_sha
+    anet_layer   = fsun*anet_sun + (1.0_r8 - fsun)*anet_sha
+    lai_layer    = lai_sun_z + lai_sha_z
+
+    if (present(solve_iter_sun)) solve_iter_sun = solve_iter_sun_l
+    if (present(solve_iter_sha)) solve_iter_sha = solve_iter_sha_l
+
+  end subroutine LeafLayerSunShade
+
+  ! ==========================================================================
   
 end module FatesTestLeafPhotoMod

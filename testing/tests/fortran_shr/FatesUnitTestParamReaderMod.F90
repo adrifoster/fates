@@ -13,6 +13,7 @@ module FatesUnitTestParamReaderMod
   use FatesParameterDerivedMod,   only : param_derived
   use FatesGlobals,               only : fates_log
   use FatesLeafBiophysParamsMod,  only : TransferParamsLeafBiophys
+  use FatesTwoStreamUtilsMod,     only : TransferRadParams
   use EDParamsMod,                only : TransferParamsGeneric
   use SFParamsMod,                only : TransferParamsSpitFire
   use PRTInitParamsFatesMod,      only : TransferParamsPRT
@@ -58,10 +59,12 @@ contains
     call TransferParamsPRT(pstruct)
     call TransferParamsLeafBiophys(pstruct)
     call TransferParamsPFT(pstruct)
-   
+
     nleafage = size(prt_params%leaf_long, dim=2)
     numpft = size(prt_params%wood_density, dim=1)
-  
+
+    call TransferRadParams()
+
     ! initialize derived parameters
     call param_derived%Init(size(prt_params%wood_density, dim=1))
     

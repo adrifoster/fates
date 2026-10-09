@@ -125,7 +125,7 @@ program FatesLeafLevelPhoto
   lb_params%stomatal_assim_model = net_assim_model
   lb_params%photo_tempsens_model = photosynth_acclim_model_kumarathunge_etal_2019
   
-  ! do a parameter check if for Atkin parameters
+  ! do a parameter check for Atkin parameters
   call CheckLeafRespParams()
   
   ! leaf N content for target_pft - constant for the whole run

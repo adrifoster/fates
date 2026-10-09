@@ -6,6 +6,7 @@ list(APPEND fates_sources
   SyntheticPatchTypes.F90
   FatesTestLeafPhotoMod.F90
   FatesTestEnvironmentMod.F90
+  FatesTestLightEnvMod.F90
   FatesUnitTestUtils.F90)
 
 sourcelist_to_parent(fates_sources)
