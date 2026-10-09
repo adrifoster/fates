@@ -273,8 +273,10 @@ program FatesCanopyLevelPhoto
     
     ! free the light environment
     call light_env%Free()
-  
+    
   end do 
+  
+  call WriteOutput()
   
   contains 
   

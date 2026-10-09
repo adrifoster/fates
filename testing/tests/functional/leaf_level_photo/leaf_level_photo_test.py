@@ -33,7 +33,7 @@ class LeafLevelPhoto(FunctionalTest):
     ]
 
     def plot_output(self, run_dir: str, save_figs: bool, plot_dir: str):
-        """Plots - update this to plot your output
+        """Plots
 
         Args:
             run_dir (str): run directory
