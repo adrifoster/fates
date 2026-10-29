@@ -103,6 +103,7 @@ module EDPftvarcon
                                                                    ! only with Atkin et al. 2017 respiration model
      real(r8), allocatable :: maintresp_leaf_vert_scaler_coeff2(:) ! leaf maintenance respiration decrease through the canopy param 2
                                                                    ! only with Atkin et al. 2017 respiraiton model 
+     real(r8), allocatable :: flnr(:)                ! fraction of leaf N in Rubisco [-]
      real(r8), allocatable :: bmort(:)
      real(r8), allocatable :: mort_ip_size_senescence(:) ! inflection point of dbh dependent senescence
      real(r8), allocatable :: mort_r_size_senescence(:)  ! rate of change in mortality with dbh
@@ -411,6 +412,10 @@ contains
     param_p => pstruct%GetParamFromName('fates_maintresp_leaf_vert_scaler_coeff2')
     allocate(EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff2(numpft))
     EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff2(:) = param_p%r_data_1d(:)
+    
+    param_p => pstruct%GetParamFromName('fates_leaf_flnr')
+    allocate(EDPftvarcon_inst%flnr(numpft))
+    EDPftvarcon_inst%flnr(:) = param_p%r_data_1d(:)
     
     param_p => pstruct%GetParamFromName('fates_prescribed_npp_canopy')
     allocate(EDPftvarcon_inst%prescribed_npp_canopy(numpft))
@@ -937,6 +942,7 @@ contains
         write(fates_log(),fmt0) 'hydro_vg_n_node  = ',EDPftvarcon_inst%hydr_vg_n_node
         write(fates_log(),fmt0) 'maintresp_leaf_vert_scaler_coeff1 = ',EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff1
         write(fates_log(),fmt0) 'maintresp_leaf_vert_scaler_coeff2 = ',EDPftvarcon_inst%maintresp_leaf_vert_scaler_coeff2
+        write(fates_log(),fmt0) 'flnr = ',EDPftvarcon_inst%flnr
         write(fates_log(),*) '-------------------------------------------------'
 
      end if

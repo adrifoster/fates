@@ -65,6 +65,7 @@ program FatesLeafLevelPhoto
   real(r8)                      :: smpso                ! soil matric potential at full stomatal opening [mm, negative]
   real(r8)                      :: qs_dummy             ! saturation specific humidity output from QSat (unused here)
   real(r8)                      :: smp                  ! soil matric potential at a swept soil water content fraction [mm]
+  real(r8)                      :: flnr                 ! fraction of leaf N in Rubisco
   integer                       :: target_pft           ! PFT to use
   integer                       :: n_par                ! PAR sweep array size 
   integer                       :: n_co2                ! CO2 sweep array size 
@@ -81,7 +82,9 @@ program FatesLeafLevelPhoto
   real(r8), allocatable :: anet_bysoilfrac(:), agross_bysoilfrac(:), gs_bysoilfrac(:), ci_bysoilfrac(:)
   
   ! CONSTANTS:
-  integer, parameter :: default_pft = 1 ! default PFT index to evaluate (1-based)
+  integer,  parameter :: default_pft = 6 ! default PFT index to evaluate (1-based)
+  real(r8), parameter :: fnr = 7.16_r8
+  real(r8), parameter :: ar25 = 60.0_r8
   
   ! sweep ranges
   real(r8), parameter :: min_temp = 8.0_r8,    max_temp = 40.0_r8,    temp_inc = 0.5_r8   ! [degC]
@@ -128,13 +131,18 @@ program FatesLeafLevelPhoto
   ! do a parameter check for Atkin parameters
   call CheckLeafRespParams()
   
+  flnr = EDPftvarcon_inst%flnr(target_pft)
+  
   ! leaf N content for target_pft - constant for the whole run
   lnc_top = LeafNitrogenContent(target_pft)
+  vcmax25top = lnc_top * flnr * fnr * ar25
   
   ! photosynthetic capacity parameters for target_pft
-  vcmax25top = EDPftvarcon_inst%vcmax25top(target_pft,1)
-  jmax25top = param_derived%jmax25top(target_pft,1)
-  kp25top = param_derived%kp25top(target_pft,1)
+  !vcmax25top = EDPftvarcon_inst%vcmax25top(target_pft,1)
+  !jmax25top = param_derived%jmax25top(target_pft,1)
+  !kp25top = param_derived%kp25top(target_pft,1)
+  jmax25top = 1.67_r8 * vcmax25top
+  kp25top = 20000._r8 * vcmax25top
   
   ! soil stress parameters for target_pft
   smpsc = EDPftvarcon_inst%smpsc(target_pft)

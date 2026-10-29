@@ -12,7 +12,6 @@ module FatesTestLeafPhotoMod
   use PRTParametersMod,       only : prt_params
   use PRTGenericMod,          only : leaf_organ
   use EDPftvarcon,            only : EDPftvarcon_inst
-  use PRTParametersMod,       only : prt_params
   use LeafBiophysicsMod,      only : ConvertPar
   use LeafBiophysicsMod,      only : GetCanopyGasParameters
   use LeafBiophysicsMod,      only : LeafLayerBiophysicalRates

@@ -849,6 +849,13 @@
       "units": "flag",
       "data": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]
     },
+    "fates_leaf_flnr": {
+      "dtype": "float",
+      "dims": ["fates_pft"],
+      "long_name": "fraction of leaf nitrogen in Rubisco",
+      "units": "fraction",
+      "data": [0.0461, 0.0509, 0.0546, 0.0515, 0.0716, 0.1007, 0.0517, 0.0943, 0.0943, 0.0517, 0.0943, 0.1365, 0.1365, 0.09]
+    },
     "fates_leaf_fnps": {
       "dtype": "float",
       "dims": ["fates_pft"],
